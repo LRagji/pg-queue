@@ -1,0 +1,27 @@
+{
+  "name": "pg-queue",
+  "version": "0.0.1",
+  "description": "Simple Q implementation on postgres.",
+  "main": "index.js",
+  "scripts": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LRagji/pg-queue.git"
+  },
+  "keywords": [
+    "Q",
+    "Queue",
+    "PG"
+  ],
+  "author": "Laukik",
+  "license": "SEE LICENSE IN license.md",
+  "bugs": {
+    "url": "https://github.com/LRagji/pg-queue/issues"
+  },
+  "homepage": "https://github.com/LRagji/pg-queue#readme",
+  "dependencies": {
+    "pg-promise": "^10.6.2"
+  }
+}
