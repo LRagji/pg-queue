@@ -1,18 +1,13 @@
 # pg-queue
 
 This package is a simple que implementation for postgres which can be used with horizontally scaled microservices. and provides following features
-1. Cursor based implementation,(Not DB Cursor)
-2. Message Acknowledgements for cursor to move forward.
-3. Can be used with H-Scaled services.
-4. Timeout based cursor reading.
-
+1. Multiple Publishers with Multiple Subscribers but Sequential Execution with Message Acks and Timeouts
+2. Can be used with H-Scaled services or with mutiple threads within a single process.
 
 ## Built with
 
 1. Authors love for Open Source.
 2. [pg-promise](https://www.npmjs.com/package/pg-promise).
-3. [ioredis](https://www.npmjs.com/package/ioredis).
-4. [redis-scripto](https://www.npmjs.com/package/redis-scripto).
 
 ## Contributions
 

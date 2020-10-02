@@ -22,6 +22,9 @@
   },
   "homepage": "https://github.com/LRagji/pg-queue#readme",
   "dependencies": {
-    "pg-promise": "^10.6.2"
+    "mocha": "^8.1.3",
+    "nyc": "^15.1.0",
+    "pg-promise": "^10.6.2",
+    "sinon": "^9.1.0"
   }
 }
