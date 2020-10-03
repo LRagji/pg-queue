@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS $2:name
 CREATE INDEX "Cursor_Ack" ON $2:name USING btree("CursorId" ASC NULLS LAST, "Ack" ASC NULLS LAST);
 CREATE INDEX "Cursor_Token" ON $2:name USING btree("CursorId" ASC NULLS LAST, "Token" ASC NULLS LAST);
 
-CREATE OR REPLACE FUNCTION public."QueueVersion"()
+CREATE OR REPLACE FUNCTION "QueueVersion"()
     RETURNS text
     LANGUAGE SQL
 AS $$ SELECT $3 $$;
