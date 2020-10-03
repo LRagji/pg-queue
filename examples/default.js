@@ -13,7 +13,7 @@ const writeConfigParams = {
     max: 2 //2 Writer
 };
 const Qname = "Laukik";
-const Q = new QType(Qname, readConfigParams, writeConfigParams);
+const publisherQ = new QType(Qname, readConfigParams, writeConfigParams);
 let publisherHandle;
 
 function publisher() {
@@ -24,11 +24,13 @@ function publisher() {
         ctr--
     };
     //console.time("Publishing");
-    Q.enque(payloads).then((result) => {
+    publisherQ.enque(payloads).then((result) => {
         //console.timeEnd("Publishing");
         publisherHandle = setTimeout(publisher, 1000);
     }).catch((err) => console.error(err));
 }
+
+// publisherQ.tryDeque().then(console.log).catch(console.error);
 
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
 const workers = [];
@@ -48,32 +50,38 @@ if (isMainThread) {
         numberOfSubscribers--;
     }
     publisherHandle = setTimeout(publisher, 1000);
-    Promise.all(workers).then((msg) => console.log(msg)).catch((err) => console.error(err));
+    Promise.all(workers).then(console.log).catch(console.error);
     console.log("Press CTRL+C key to stop publisher.");
 }
 else {
     const maxNumberofMessagesToFetch = workerData[0];
     const ThreadName = workerData[1];
+    const subThreadSpecificQ = new QType(Qname, readConfigParams, writeConfigParams);
     const waitForMessages = async (waitForMessageCount) => {
+        let results = { "Subscriber": ThreadName, "Processed": [] }
         const sleep = (t) => new Promise((a, r) => setTimeout(a, t));
         while (waitForMessageCount > 0) {
-            console.time("Deque-" + ThreadName);
-            let payload = await Q.tryDeque();
-            console.timeEnd("Deque-" + ThreadName);
+            //console.time("Deque-" + ThreadName);
+            let payload = await subThreadSpecificQ.tryDeque();
+            //console.timeEnd("Deque-" + ThreadName);
             if (payload != null) {
-                console.log(`Thread:${ThreadName} got ${payload}`);
+                console.log(`Thread:${ThreadName} Acquired`);
                 let acked = false;
                 while (acked === false) {
-                    console.time("Ack-" + ThreadName);
-                    acked = await Q.tryAcknowledge();
-                    console.timeEnd("Ack-" + ThreadName);
+                    //console.time("Ack-" + ThreadName);
+                    acked = await subThreadSpecificQ.tryAcknowledge();
+                    //console.timeEnd("Ack-" + ThreadName);
+                    await sleep(1000);
                 }
+                console.log(`Thread:${ThreadName} Released`);
+                results.Processed.push(payload);
                 waitForMessageCount--;
             }
             else {
                 await sleep(1000);
             }
         }
+        return results;
     };
     waitForMessages(maxNumberofMessagesToFetch).then((r) => parentPort.postMessage(r));
 }

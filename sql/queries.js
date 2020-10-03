@@ -10,7 +10,7 @@ module.exports = (cursorTableName, qTableName) => ({
     "TransactionLock": new PreparedStatement({ name: 'TransactionLock', text: `SELECT pg_try_advisory_xact_lock(hashtext($1)) as "Locked";` }),
     "Deque": new PreparedStatement({
         name: 'Deque', text: pgPromise.as.format(`INSERT INTO $[cursorTableName:name] ("Timestamp","Serial","CursorId","Ack")
-    SELECT "Q"."Timestamp","Q"."Serial",1,0
+    SELECT "Q"."Timestamp","Q"."Serial",$1,0
     FROM $[qTableName:name] AS "Q" 
     JOIN (
         SELECT "Timestamp","Serial"
@@ -44,7 +44,7 @@ module.exports = (cursorTableName, qTableName) => ({
         name: 'TimeoutSnatch', text: pgPromise.as.format(`UPDATE $[cursorTableName:name] SET
     "Fetched"= NOW() AT TIME ZONE 'UTC',
     "Token"= (floor(random()*(10000000-0+1))+0)
-    WHERE "CursorId"=$1 AND "Ack"=0 AND ((NOW() AT TIME ZONE 'UTC')-"Fetched") > ($2 +'0 Second'::Interval)
+    WHERE "CursorId"=$1 AND "Ack"=0 AND ((NOW() AT TIME ZONE 'UTC')-"Fetched") > ($2 * INTERVAL '1 Second')
     RETURNING *`, { "cursorTableName": cursorTableName })
     }),
     "ClearQ": new PreparedStatement({ name: 'ClearQ', text: pgPromise.as.format(`DELETE FROM $[qTableName:name] WHERE "Timestamp" < (SELECT "Timestamp" FROM $[cursorTableName:name] ORDER BY "Timestamp" LIMIT 1 )`, { "cursorTableName": cursorTableName, "qTableName": qTableName }) }),

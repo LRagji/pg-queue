@@ -14,6 +14,7 @@ const transactionMode = new pgp.txMode.TransactionMode({
     readOnly: false,
     deferrable: false
 });
+const serializationError = '40001';
 module.exports = class PgQueue {
 
     name;
@@ -110,7 +111,7 @@ module.exports = class PgQueue {
                 })
             }
             catch (err) {
-                if (err.code === 40001)//Serialization error
+                if (err.code === serializationError)//Serialization error
                 {
                     continue;
                 }
@@ -131,7 +132,7 @@ module.exports = class PgQueue {
                 retry = 0;
             }
             catch (err) {
-                if (err.code === 40001)//Serialization error
+                if (err.code === serializationError)//Serialization error
                 {
                     continue;
                 }
@@ -141,7 +142,7 @@ module.exports = class PgQueue {
             }
             retry--;
         }
-        if (message == undefined || message.length <= 0) return undefined;
+        if (message.length <= 0) return undefined;
         message = message[0];
         this.#messageToken = message.Token;
         return this.#readerPG.one(this.#queries.FetchPayload, [message.Timestamp, message.Serial]);
@@ -153,35 +154,33 @@ module.exports = class PgQueue {
 
         await this.#initialize(schemaVersion);
 
+        let threadCachedToken = this.#messageToken;
         let message;
         while (retry > 0) {
             try {
                 message = await this.#writerPG.tx(transactionMode, transaction => {
-                    return transaction.any(this.#queries.Ack, [this.#cursorId, this.#messageToken]);
+                    return transaction.any(this.#queries.Ack, [this.#cursorId, threadCachedToken]);
                 });
                 retry = -100;
             }
             catch (err) {
-                if (err.code === 40001)//Serialization error
+                if (err.code === serializationError)//Serialization error
                 {
+                    retry--;
                     continue;
                 }
                 else {
                     throw err;
                 }
             }
-            if ((message == undefined || message.length < 1) && retry === -100) {
-                throw new Error("Cannot acknowledge payload, cause someone else may have processed it owning to timeout(STW). Token:" + this.#messageToken)
-            }
-            retry--;
         }
-        if ((message == undefined || message.length < 1) && retry !== -100) {
-            return false;
+        if (message.length < 1 && retry === -100) {//We were sucessfull but no results
+            throw new Error("Cannot acknowledge payload, cause someone else may have processed it owning to timeout(STW). Token:" + threadCachedToken)
         }
-        else if (message != undefined || message.length > 0) {
-            return true;
+        else if (message.length > 0) {
+            return message[0].Token === threadCachedToken;
         }
+        return false;
     }
-
 }
 //Why cant this be done with pg-cursors? Cursors are session lived object not available across connections(Even WITH HOLD).
