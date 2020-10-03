@@ -112,7 +112,8 @@ module.exports = class PgQueue {
         while (retry > 0) {
             //Try for timed out messages
             try {
-                message = await this.#writerPG.tx(this.#serializeTransactionMode, transaction => {
+                let mode = this.#serializeTransactionMode;
+                message = await this.#writerPG.tx({ mode }, transaction => {
                     return transaction.any(this.#queries.TimeoutSnatch, [this.#cursorId, messageAcquiredTimeout]);
                 })
             }
@@ -132,7 +133,8 @@ module.exports = class PgQueue {
 
             //Try acquiring new messages
             try {
-                message = await this.#writerPG.tx(this.#serializeTransactionMode, transaction => {
+                let mode = this.#serializeTransactionMode;
+                message = await this.#writerPG.tx({ mode }, transaction => {
                     return transaction.any(this.#queries.Deque, [this.#cursorId]);
                 });
                 retry = 0;
@@ -167,7 +169,8 @@ module.exports = class PgQueue {
         let message;
         while (retry > 0) {
             try {
-                message = await this.#writerPG.tx(this.#serializeTransactionMode, transaction => {
+                let mode = this.#serializeTransactionMode;
+                message = await this.#writerPG.tx({ mode }, transaction => {
                     return transaction.any(this.#queries.Ack, [this.#cursorId, token]);
                 });
                 retry = -100;
