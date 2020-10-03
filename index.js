@@ -84,7 +84,10 @@ module.exports = class PgQueue {
     }
 
     async enque(payloads) {
+        if (Array.isArray(payloads) === false) throw new Error("Invalid parameter, expecting array of payloads");
+
         await this.#initialize(schemaVersion);
+        payloads = payloads.map(e => ({ "Payload": e }));
         const qTable = new this.#pgp.helpers.TableName({ "table": this.#QTableName });
         const columnDef = new this.#pgp.helpers.ColumnSet(["Payload:json"], { table: qTable });
         const query = this.#pgp.helpers.insert(payloads, columnDef);

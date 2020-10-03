@@ -20,7 +20,7 @@ function publisher() {
     let payloads = [];
     let ctr = 100;
     while (ctr > 0) {
-        payloads.push({ "Payload": { "Id": ctr, "Time": Date.now() } });
+        payloads.push(ctr);
         ctr--
     };
     //console.time("Publishing");
