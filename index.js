@@ -68,7 +68,7 @@ module.exports = class PgQueue {
         }
 
         await this.#writerPG.tx(async transaction => {
-            let acquired = await transaction.one(this.#queries.TransactionLock, [version]);
+            let acquired = await transaction.one(this.#queries.TransactionLock, [("Q" + version)]);
             if (acquired.Locked === true) {
                 for (let idx = 0; idx < this.#queries["Schema0.0.1"].length; idx++) {
                     let step = this.#queries["Schema0.0.1"][idx];
