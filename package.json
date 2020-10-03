@@ -1,6 +1,6 @@
 {
-  "name": "pg-queue",
-  "version": "0.0.1",
+  "name": "pg-que",
+  "version": "0.0.2",
   "description": "Simple Q implementation on postgres.",
   "main": "index.js",
   "scripts": {

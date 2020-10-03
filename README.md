@@ -1,14 +1,14 @@
-# pg-queue
+# pg-que
 
-This package is a simple que implementation for postgres which can be used with horizontally scaled microservices. and provides following features
+This package is a simple queue implementation for postgres which can be used with horizontally scaled microservices. and provides following features
 1. Multiple Publishers with Multiple Subscribers but Sequential Execution with Message Acks and Timeouts.
 3. Message persistency.
 2. Can be used with H-Scaled services or with mutiple threads within a single process.
 
 ## Getting Started
 
-1. Install using `npm i pg-queue`
-2. Require in your project. `const QType = require('pg-queue');`
+1. Install using `npm i pg-que`
+2. Require in your project. `const QType = require('pg-que');`
 3. Run postgres as local docker if required. `docker run --name pg-12.4 -e POSTGRES_PASSWORD=mysecretpassword -e POSTGRES_DB=pg-queue -p 5432:5432 -d postgres:12.4-alpine`
 4. Instantiate with a postgres readers and writers connection details. 
 5. All done, Start using it!!.
@@ -19,7 +19,7 @@ A complete example can be found at [here](https://raw.githubusercontent.com/LRag
 
 1. **Initialize**
 ```javascript
-const QType = require('pg-queue');
+const QType = require('pg-que');
 const defaultConectionString = "postgres://postgres:@localhost:5432/pg-queue";
 const readConfigParams = {
     connectionString: defaultConectionString,
