@@ -13,7 +13,7 @@ const writeConfigParams = {
     max: 2 //2 Writer
 };
 const Qname = "Laukik";
-const publisherQ = new QType(Qname, readConfigParams, writeConfigParams);
+const Q = new QType(Qname, readConfigParams, writeConfigParams);
 let publisherHandle;
 
 function publisher() {
@@ -24,13 +24,12 @@ function publisher() {
         ctr--
     };
     //console.time("Publishing");
-    publisherQ.enque(payloads).then((result) => {
+    Q.enque(payloads).then((result) => {
         //console.timeEnd("Publishing");
         publisherHandle = setTimeout(publisher, 1000);
     }).catch((err) => console.error(err));
 }
 
-// publisherQ.tryDeque().then(console.log).catch(console.error);
 
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
 const workers = [];
@@ -56,24 +55,23 @@ if (isMainThread) {
 else {
     const maxNumberofMessagesToFetch = workerData[0];
     const ThreadName = workerData[1];
-    const subThreadSpecificQ = new QType(Qname, readConfigParams, writeConfigParams);
     const waitForMessages = async (waitForMessageCount) => {
         let results = { "Subscriber": ThreadName, "Processed": [] }
         const sleep = (t) => new Promise((a, r) => setTimeout(a, t));
         while (waitForMessageCount > 0) {
             //console.time("Deque-" + ThreadName);
-            let payload = await subThreadSpecificQ.tryDeque();
+            let payload = await Q.tryDeque();
             //console.timeEnd("Deque-" + ThreadName);
             if (payload != null) {
-                console.log(`Thread:${ThreadName} Acquired`);
+                console.log(`Thread:${ThreadName} Acquired ${payload.Id.T}-${payload.Id.S}`);
                 let acked = false;
                 while (acked === false) {
                     //console.time("Ack-" + ThreadName);
-                    acked = await subThreadSpecificQ.tryAcknowledge();
+                    acked = await Q.tryAcknowledge(payload.AckToken);
                     //console.timeEnd("Ack-" + ThreadName);
                     await sleep(1000);
                 }
-                console.log(`Thread:${ThreadName} Released`);
+                console.log(`Thread:${ThreadName} Acknowledged ${payload.Id.T}-${payload.Id.S}`);
                 results.Processed.push(payload);
                 waitForMessageCount--;
             }

@@ -24,7 +24,6 @@ module.exports = class PgQueue {
     #schemaInitialized = false;
     #QTableName;
     #CursorTableName;
-    #messageToken;
     #qGCCounter = 0;
     #qCleanThreshhold = 100;
     #queries;
@@ -144,22 +143,25 @@ module.exports = class PgQueue {
         }
         if (message.length <= 0) return undefined;
         message = message[0];
-        this.#messageToken = message.Token;
-        return this.#readerPG.one(this.#queries.FetchPayload, [message.Timestamp, message.Serial]);
+        let payload = await this.#readerPG.one(this.#queries.FetchPayload, [message.Timestamp, message.Serial]);
+        return {
+            "Id": { "T": message.Timestamp, "S": message.Serial },
+            "AckToken": message.Token,
+            "Payload": payload[0]
+        }
     }
 
-    async tryAcknowledge(retry = 10) {
+    async tryAcknowledge(token,retry = 10) {
         retry = parseInt(retry);
         if (Number.isNaN(retry)) throw new Error("Invalid retry count " + retry);
 
         await this.#initialize(schemaVersion);
 
-        let threadCachedToken = this.#messageToken;
         let message;
         while (retry > 0) {
             try {
                 message = await this.#writerPG.tx(transactionMode, transaction => {
-                    return transaction.any(this.#queries.Ack, [this.#cursorId, threadCachedToken]);
+                    return transaction.any(this.#queries.Ack, [this.#cursorId, token]);
                 });
                 retry = -100;
             }
@@ -175,10 +177,10 @@ module.exports = class PgQueue {
             }
         }
         if (message.length < 1 && retry === -100) {//We were sucessfull but no results
-            throw new Error("Cannot acknowledge payload, cause someone else may have processed it owning to timeout(STW). Token:" + threadCachedToken)
+            throw new Error("Cannot acknowledge payload, cause someone else may have processed it owning to timeout(STW). Token:" + token)
         }
         else if (message.length > 0) {
-            return message[0].Token === threadCachedToken;
+            return message[0].Token === token;
         }
         return false;
     }
