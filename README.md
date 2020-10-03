@@ -84,7 +84,7 @@ Mode 1: Simple Que with multiple publishers and multiple subscribers and message
 2. Raise a Pull Request.
 
 ## Current Version:
-0.0.1[Beta]
+0.0.3[Beta]
 
 ## License
 
