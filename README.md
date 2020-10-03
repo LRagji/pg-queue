@@ -57,13 +57,19 @@ Q.dispose();//Releases all resources including connections.
 ## Theory
 
 ### *Why build one when there are tons of options avaialble for distributed queue?*
-Yes there are N options available for queues,Eg RabbitMQ,Redis Streams, Etc, but they are different systems all together which means application has to maintain sync between them and cater to failure modes for system being different. So needed one stop solution for all these common needs so made one based on PG.
+Yes, there are N options available for queues, eg: RabbitMQ, Redis Streams, Kafka etc, but they all are different systems, which means application has to maintain sync between them and cater to failure modes for system being different. There was a need for one stop solution for all these common scenarios of applications and thus this package came into existence.
 
 ### *Can this be adopted to different languages?*
-Yes cause it uses concepts which are PG based and not language specific so yes a port is possible.
+Yes, it uses concepts which are PG based and not language specific so yes a port is possible.
+
+### *What core concepts have been used?*
+1. **SERIALIZABLE Transactions**: This is a transaction mode in PG, used to make sure only one subscriber get into the que at a time.
+2. **Cursors**: Each subscriber maintains a cursor of what was read by it, it will not increment until ack has been received for the same.
+3. **Acknowledgements**: Each message once read can be marked as completed and done with acks, this helps to confirm consumptions on the subscriber side and for cursor to move ahead.
+4. **Timeouts**: if a subscriber acquires a message and then abprutly dies. The same message can be picked up by other subscriber after a certain timeout.
 
 ### *What different modes are supported?*
-Mode 1: Simple Que with multiple publishers and multiple subscribers and messages getting sequentially executed between them, as shown below , mode modes may land in future.
+Mode 1: Simple Que with multiple publishers and multiple subscribers and messages getting sequentially executed between them, as shown below , more modes may land in future.
 
 ![Mode-1](./docs/Mode1.png)
 
