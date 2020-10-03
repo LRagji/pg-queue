@@ -1,19 +1,6 @@
 const queries = require('./sql/queries');
-const initOptions = {
-    // query(e) {
-    //     console.log(e.query);
-    // },
-    schema: 'public' // default schema(s)
-};
-const pgp = require('pg-promise')(initOptions);
-pgp.pg.types.setTypeParser(20, BigInt); // This is for serialization bug of BigInts as strings.
-pgp.pg.types.setTypeParser(1114, str => str); // UTC Formatting Bug, 1114 is OID for timestamp in Postgres.
+const pg = require('pg-promise')
 const schemaVersion = "0.0.1";
-const transactionMode = new pgp.txMode.TransactionMode({
-    tiLevel: pgp.txMode.isolationLevel.serializable,
-    readOnly: false,
-    deferrable: false
-});
 const serializationError = '40001';
 module.exports = class PgQueue {
 
@@ -27,18 +14,34 @@ module.exports = class PgQueue {
     #qGCCounter = 0;
     #qCleanThreshhold = 100;
     #queries;
+    #pgp;
+    #serializeTransactionMode;
 
-    static checkForSimilarConnection(aConfigParams, bConfigParams, aConnection) {
+    static checkForSimilarConnection(aConfigParams, bConfigParams, aConnection, newConnectionCallback) {
         if (aConfigParams === bConfigParams) {
             return aConnection;
         }
         else {
-            return pgp(bConfigParams);
+            return newConnectionCallback(bConfigParams);
         }
     }
 
-    constructor(name, readerPG, writerPG, cleanQAfter = 10) {
+    constructor(name, readerPG, writerPG, schema = 'public', cleanQAfter = 10) {
         this.#cursorId = 1;
+        const initOptions = {
+            // query(e) {
+            //     console.log(e.query);
+            // },
+            "schema": schema
+        };
+        this.#pgp = pg(initOptions);
+        this.#pgp.pg.types.setTypeParser(20, BigInt); // This is for serialization bug of BigInts as strings.
+        this.#pgp.pg.types.setTypeParser(1114, str => str); // UTC Timestamp Formatting Bug, 1114 is OID for timestamp in Postgres.
+        this.#serializeTransactionMode = new this.#pgp.txMode.TransactionMode({
+            tiLevel: this.#pgp.txMode.isolationLevel.serializable,
+            readOnly: false,
+            deferrable: false
+        });
         this.#qCleanThreshhold = cleanQAfter;
         this.name = name;
         this.#QTableName = "Q-" + this.name;
@@ -47,9 +50,10 @@ module.exports = class PgQueue {
         this.enque = this.enque.bind(this);
         this.tryDeque = this.tryDeque.bind(this);
         this.tryAcknowledge = this.tryAcknowledge.bind(this);
+        this.dispose = this.dispose.bind(this);
         this.#initialize = this.#initialize.bind(this);
-        this.#readerPG = pgp(readerPG);
-        this.#writerPG = PgQueue.checkForSimilarConnection(readerPG, writerPG, this.#readerPG);
+        this.#readerPG = this.#pgp(readerPG);
+        this.#writerPG = PgQueue.checkForSimilarConnection(readerPG, writerPG, this.#readerPG, (c) => this.#pgp(c));
     }
 
     #initialize = async (version) => {
@@ -81,9 +85,9 @@ module.exports = class PgQueue {
 
     async enque(payloads) {
         await this.#initialize(schemaVersion);
-        const qTable = new pgp.helpers.TableName({ "table": this.#QTableName });
-        const columnDef = new pgp.helpers.ColumnSet(["Payload:json"], { table: qTable });
-        const query = pgp.helpers.insert(payloads, columnDef);
+        const qTable = new this.#pgp.helpers.TableName({ "table": this.#QTableName });
+        const columnDef = new this.#pgp.helpers.ColumnSet(["Payload:json"], { table: qTable });
+        const query = this.#pgp.helpers.insert(payloads, columnDef);
         await this.#writerPG.none(query);
         this.#qGCCounter++;
         if (this.#qGCCounter >= this.#qCleanThreshhold) {
@@ -105,7 +109,7 @@ module.exports = class PgQueue {
         while (retry > 0) {
             //Try for timed out messages
             try {
-                message = await this.#writerPG.tx(transactionMode, transaction => {
+                message = await this.#writerPG.tx(this.#serializeTransactionMode, transaction => {
                     return transaction.any(this.#queries.TimeoutSnatch, [this.#cursorId, messageAcquiredTimeout]);
                 })
             }
@@ -125,7 +129,7 @@ module.exports = class PgQueue {
 
             //Try acquiring new messages
             try {
-                message = await this.#writerPG.tx(transactionMode, transaction => {
+                message = await this.#writerPG.tx(this.#serializeTransactionMode, transaction => {
                     return transaction.any(this.#queries.Deque, [this.#cursorId]);
                 });
                 retry = 0;
@@ -151,7 +155,7 @@ module.exports = class PgQueue {
         }
     }
 
-    async tryAcknowledge(token,retry = 10) {
+    async tryAcknowledge(token, retry = 10) {
         retry = parseInt(retry);
         if (Number.isNaN(retry)) throw new Error("Invalid retry count " + retry);
 
@@ -160,7 +164,7 @@ module.exports = class PgQueue {
         let message;
         while (retry > 0) {
             try {
-                message = await this.#writerPG.tx(transactionMode, transaction => {
+                message = await this.#writerPG.tx(this.#serializeTransactionMode, transaction => {
                     return transaction.any(this.#queries.Ack, [this.#cursorId, token]);
                 });
                 retry = -100;
@@ -183,6 +187,10 @@ module.exports = class PgQueue {
             return message[0].Token === token;
         }
         return false;
+    }
+
+    dispose() {
+        this.#pgp.end();
     }
 }
 //Why cant this be done with pg-cursors? Cursors are session lived object not available across connections(Even WITH HOLD).

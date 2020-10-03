@@ -38,7 +38,7 @@ if (isMainThread) {
     const processingPerSub = 10;
     while (numberOfSubscribers > 0) {
         workers.push(new Promise((resolve, reject) => {
-            const worker = new Worker(__filename, { workerData: [processingPerSub, ("Sub-" + numberOfSubscribers)] });
+            const worker = new Worker(__filename, { workerData: [processingPerSub, ("Sub-" + numberOfSubscribers), 100] });
             worker.on('message', resolve);
             worker.on('error', reject);
             worker.on('exit', (code) => {
@@ -49,15 +49,23 @@ if (isMainThread) {
         numberOfSubscribers--;
     }
     publisherHandle = setTimeout(publisher, 1000);
-    Promise.all(workers).then(console.log).catch(console.error);
-    console.log("Press CTRL+C key to stop publisher.");
+    Promise.all(workers).then((results) => {
+        clearTimeout(publisherHandle);
+        console.log(`${workers.length} Subscribers completed, Publisher Stopped.`);
+        console.timeEnd("Application");
+        Q.dispose();
+        console.table(results);
+    }).catch(console.error);
+    console.log(`1 Publisher(Main Thread) and ${workers.length} Subscribers active.`);
+    console.time("Application");
 }
 else {
     const maxNumberofMessagesToFetch = workerData[0];
     const ThreadName = workerData[1];
+    const sleepTime = workerData[2];
+    const sleep = () => new Promise((a, r) => setTimeout(a, sleepTime));
     const waitForMessages = async (waitForMessageCount) => {
         let results = { "Subscriber": ThreadName, "Processed": [] }
-        const sleep = (t) => new Promise((a, r) => setTimeout(a, t));
         while (waitForMessageCount > 0) {
             //console.time("Deque-" + ThreadName);
             let payload = await Q.tryDeque();
@@ -69,14 +77,14 @@ else {
                     //console.time("Ack-" + ThreadName);
                     acked = await Q.tryAcknowledge(payload.AckToken);
                     //console.timeEnd("Ack-" + ThreadName);
-                    await sleep(1000);
+                    await sleep();
                 }
                 console.log(`Thread:${ThreadName} Acknowledged ${payload.Id.T}-${payload.Id.S}`);
                 results.Processed.push(payload);
                 waitForMessageCount--;
             }
             else {
-                await sleep(1000);
+                await sleep();
             }
         }
         return results;
