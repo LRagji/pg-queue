@@ -1,7 +1,9 @@
 const queries = require('./sql/queries');
 const pg = require('pg-promise')
+const crypto = require('crypto');
 const schemaVersion = "0.0.1";
 const serializationError = '40001';
+
 module.exports = class PgQueue {
 
     name;
@@ -45,8 +47,8 @@ module.exports = class PgQueue {
             deferrable: false
         });
         this.#qCleanThreshhold = cleanQAfter;
-        this.name = name;
-        this.#QTableName = "Q-" + this.name; //TODO HASH THIS NAME MAX LIMIT IS 60 Chars
+        this.name = crypto.createHash('md5').update(name).digest('hex');
+        this.#QTableName = "Q-" + this.name;
         this.#CursorTableName = "Cursor-" + this.name;
         this.#CursorTablePKName = this.#CursorTableName + "-PK";
         this.#VersionFuncName = "QVF-" + this.name;
