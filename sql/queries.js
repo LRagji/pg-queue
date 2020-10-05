@@ -6,7 +6,7 @@ function sql(file) {
     const fullPath = path.join(__dirname, file); // generating full path;
     return new QueryFile(fullPath, { minify: true });
 }
-module.exports = (cursorTableName, cursorPK, qTableName) => ({
+module.exports = (cursorTableName, cursorPK, qTableName, schema, queryVersionFunctionname) => ({
     "TransactionLock": new PreparedStatement({ name: 'TransactionLock', text: `SELECT pg_try_advisory_xact_lock(hashtext($1)) as "Locked";` }),
     "Deque": new PreparedStatement({
         name: 'Deque', text: pgPromise.as.format(`INSERT INTO $[cursorTableName:name] ("Timestamp","Serial","CursorId","Ack")
@@ -49,8 +49,14 @@ module.exports = (cursorTableName, cursorPK, qTableName) => ({
     }),
     "ClearQ": new PreparedStatement({ name: 'ClearQ', text: pgPromise.as.format(`DELETE FROM $[qTableName:name] WHERE "Timestamp" < (SELECT "Timestamp" FROM $[cursorTableName:name] ORDER BY "Timestamp" LIMIT 1 )`, { "cursorTableName": cursorTableName, "qTableName": qTableName }) }),
     "FetchPayload": new PreparedStatement({ name: 'FetchPayload', text: pgPromise.as.format(`SELECT "Payload" FROM $[qTableName:name] WHERE "Timestamp"=$1 AND "Serial"=$2`, { "qTableName": qTableName }) }),
-    "VersionFunctionExists": new PreparedStatement({ name: 'VersionFunctionExists', text: `SELECT EXISTS(SELECT 1 FROM pg_proc WHERE proname = 'QueueVersion')` }),
-    "CheckSchemaVersion": new PreparedStatement({ name: 'CheckSchemaVersion', text: `SELECT "QueueVersion"()` }),
+    "VersionFunctionExists": new PreparedStatement({
+        name: 'VersionFunctionExists', text: pgPromise.as.format(`SELECT EXISTS(
+        SELECT 1 
+        FROM pg_catalog.pg_proc p
+        LEFT JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace 
+        WHERE proname = $[QVF] AND n.nspname::TEXT=$[schema])`, { "schema": schema, "QVF": queryVersionFunctionname })
+    }),
+    "CheckSchemaVersion": new PreparedStatement({ name: 'CheckSchemaVersion', text: pgPromise.as.format(`SELECT $[QVF:name]()`, { "QVF": queryVersionFunctionname }) }),
     "Schema0.0.1": [
         {
             "file": sql('./v1/teraform.sql'),

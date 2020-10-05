@@ -12,6 +12,7 @@ module.exports = class PgQueue {
     #QTableName;
     #CursorTableName;
     #CursorTablePKName;
+    #VersionFuncName;
     #qGCCounter = 0;
     #qCleanThreshhold = 100;
     #queries;
@@ -45,10 +46,11 @@ module.exports = class PgQueue {
         });
         this.#qCleanThreshhold = cleanQAfter;
         this.name = name;
-        this.#QTableName = "Q-" + this.name;
+        this.#QTableName = "Q-" + this.name; //TODO HASH THIS NAME MAX LIMIT IS 60 Chars
         this.#CursorTableName = "Cursor-" + this.name;
         this.#CursorTablePKName = this.#CursorTableName + "-PK";
-        this.#queries = queries(this.#CursorTableName, this.#CursorTablePKName, this.#QTableName);
+        this.#VersionFuncName = "QVF-" + this.name;
+        this.#queries = queries(this.#CursorTableName, this.#CursorTablePKName, this.#QTableName, schema, this.#VersionFuncName);
         this.enque = this.enque.bind(this);
         this.tryDeque = this.tryDeque.bind(this);
         this.tryAcknowledge = this.tryAcknowledge.bind(this);
@@ -78,6 +80,7 @@ module.exports = class PgQueue {
                     step.params.push(this.#CursorTableName);
                     step.params.push(this.#CursorTablePKName);
                     step.params.push(version);
+                    step.params.push(this.#VersionFuncName);
                     await transaction.none(step.file, step.params);
                 };
             };
@@ -159,7 +162,7 @@ module.exports = class PgQueue {
         return {
             "Id": { "T": message.Timestamp, "S": message.Serial },
             "AckToken": message.Token,
-            "Payload": payload[0]
+            "Payload": payload.Payload
         }
     }
 

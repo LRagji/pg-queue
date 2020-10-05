@@ -18,10 +18,10 @@ CREATE TABLE IF NOT EXISTS $2:name
     CONSTRAINT $3:name PRIMARY KEY ("CursorId")
 )WITH (fillfactor=50);
 
-CREATE INDEX "Cursor_Ack" ON $2:name USING btree("CursorId" ASC NULLS LAST, "Ack" ASC NULLS LAST);
-CREATE INDEX "Cursor_Token" ON $2:name USING btree("CursorId" ASC NULLS LAST, "Token" ASC NULLS LAST);
+CREATE INDEX  ON $2:name USING btree("CursorId" ASC NULLS LAST, "Ack" ASC NULLS LAST);
+CREATE INDEX  ON $2:name USING btree("CursorId" ASC NULLS LAST, "Token" ASC NULLS LAST);
 
-CREATE OR REPLACE FUNCTION "QueueVersion"()
+CREATE OR REPLACE FUNCTION $5:name()
     RETURNS text
     LANGUAGE SQL
 AS $$ SELECT $4 $$;
