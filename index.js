@@ -11,6 +11,7 @@ module.exports = class PgQueue {
     #schemaInitialized = false;
     #QTableName;
     #CursorTableName;
+    #CursorTablePKName;
     #qGCCounter = 0;
     #qCleanThreshhold = 100;
     #queries;
@@ -46,7 +47,8 @@ module.exports = class PgQueue {
         this.name = name;
         this.#QTableName = "Q-" + this.name;
         this.#CursorTableName = "Cursor-" + this.name;
-        this.#queries = queries(this.#CursorTableName, this.#QTableName);
+        this.#CursorTablePKName = this.#CursorTableName + "-PK";
+        this.#queries = queries(this.#CursorTableName, this.#CursorTablePKName, this.#QTableName);
         this.enque = this.enque.bind(this);
         this.tryDeque = this.tryDeque.bind(this);
         this.tryAcknowledge = this.tryAcknowledge.bind(this);
@@ -74,6 +76,7 @@ module.exports = class PgQueue {
                     let step = this.#queries["Schema0.0.1"][idx];
                     step.params.push(this.#QTableName);
                     step.params.push(this.#CursorTableName);
+                    step.params.push(this.#CursorTablePKName);
                     step.params.push(version);
                     await transaction.none(step.file, step.params);
                 };

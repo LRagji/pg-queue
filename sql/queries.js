@@ -6,7 +6,7 @@ function sql(file) {
     const fullPath = path.join(__dirname, file); // generating full path;
     return new QueryFile(fullPath, { minify: true });
 }
-module.exports = (cursorTableName, qTableName) => ({
+module.exports = (cursorTableName, cursorPK, qTableName) => ({
     "TransactionLock": new PreparedStatement({ name: 'TransactionLock', text: `SELECT pg_try_advisory_xact_lock(hashtext($1)) as "Locked";` }),
     "Deque": new PreparedStatement({
         name: 'Deque', text: pgPromise.as.format(`INSERT INTO $[cursorTableName:name] ("Timestamp","Serial","CursorId","Ack")
@@ -29,7 +29,7 @@ module.exports = (cursorTableName, qTableName) => ({
     "Q"."Timestamp" = "C"."Timestamp" AND "Q"."Serial" > "C"."Serial"
     ORDER BY "Q"."Timestamp","Q"."Serial" 
     LIMIT 1
-    ON CONFLICT ON CONSTRAINT "SingleCursor"
+    ON CONFLICT ON CONSTRAINT $[cursorPK:name]
     DO UPDATE 
     SET 
     "Timestamp"=Excluded."Timestamp",
@@ -37,7 +37,7 @@ module.exports = (cursorTableName, qTableName) => ({
     "Ack"=Excluded."Ack",
     "Fetched"= NOW() AT TIME ZONE 'UTC',
     "Token"= (floor(random()*(10000000-0+1))+0)
-    RETURNING *`, { "cursorTableName": cursorTableName, "qTableName": qTableName })
+    RETURNING *`, { "cursorTableName": cursorTableName, "cursorPK": cursorPK, "qTableName": qTableName })
     }),
     "Ack": new PreparedStatement({ name: 'Ack', text: pgPromise.as.format(`UPDATE $[cursorTableName:name] SET "Ack"=1 WHERE "CursorId"=$1 AND "Token"=$2 RETURNING *`, { "cursorTableName": cursorTableName }) }),
     "TimeoutSnatch": new PreparedStatement({
