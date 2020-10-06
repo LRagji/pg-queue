@@ -56,7 +56,7 @@ module.exports = (cursorTableName, cursorPK, qTableName, schema, queryVersionFun
         LEFT JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace 
         WHERE proname = $[QVF] AND n.nspname::TEXT=$[schema])`, { "schema": schema, "QVF": queryVersionFunctionname })
     }),
-    "CheckSchemaVersion": new PreparedStatement({ name: 'CheckSchemaVersion', text: pgPromise.as.format(`SELECT $[QVF:name]()`, { "QVF": queryVersionFunctionname }) }),
+    "CheckSchemaVersion": new PreparedStatement({ name: 'CheckSchemaVersion', text: pgPromise.as.format(`SELECT $[QVF:name]() AS "QueueVersion";`, { "QVF": queryVersionFunctionname }) }),
     "Schema0.0.1": [
         {
             "file": sql('./v1/teraform.sql'),
