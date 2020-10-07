@@ -11,11 +11,10 @@ interface Payload {
 }
 
 declare class PgQueue {
-    constructor(name: string, readerPG: any, writerPG: any, schema?: string, cleanQAfter?: number);
+    constructor(name: string, readerPG: any, writerPG: any, cleanQAfter?: number);
     enque(payloads: any[]): Promise<void>;
     tryDeque(messageAcquiredTimeout?: number, retry?: number): Promise<Payload>;
     tryAcknowledge(token:number, retry?: number): Promise<Boolean>;
-    dispose(): void;
 }
 
 export default PgQueue

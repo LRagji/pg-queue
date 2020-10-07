@@ -1,6 +1,13 @@
 //This example demonstrates multiple publishers with multiple consumers with sequential reads.
 
 const QType = require('../index');
+const initOptions = {
+    // query(e) {
+    //     console.log(e.query);
+    // },
+    "schema": "Q"
+};
+const pgp = require('pg-promise')(initOptions);
 const defaultConectionString = "postgres://postgres:@localhost:5432/QUEUE";
 const readConfigParams = {
     connectionString: defaultConectionString,
@@ -12,8 +19,13 @@ const writeConfigParams = {
     application_name: "Example1-Queue-Writer",
     max: 2 //2 Writer
 };
+
 const Qname = "Laukik";
-const Q = new QType(Qname, readConfigParams, writeConfigParams);
+
+pgp.pg.types.setTypeParser(20, BigInt); // This is for serialization bug of BigInts as strings.
+pgp.pg.types.setTypeParser(1114, str => str); // UTC Timestamp Formatting Bug, 1114 is OID for timestamp in Postgres.
+
+const Q = new QType(Qname, pgp(readConfigParams), pgp(writeConfigParams));
 let publisherHandle;
 
 function publisher() {
@@ -53,7 +65,7 @@ if (isMainThread) {
         clearTimeout(publisherHandle);
         console.log(`${workers.length} Subscribers completed, Publisher Stopped.`);
         console.timeEnd("Application");
-        Q.dispose();
+        pgp.end();
         console.table(results);
     }).catch(console.error);
     console.log(`1 Publisher(Main Thread) and ${workers.length} Subscribers active.`);

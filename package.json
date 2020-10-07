@@ -1,6 +1,6 @@
 {
   "name": "pg-que",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Simple Q implementation on postgres.",
   "main": "index.js",
   "scripts": {
@@ -22,6 +22,7 @@
   },
   "homepage": "https://github.com/LRagji/pg-queue#readme",
   "dependencies": {
+    "@types/pg-promise": "^5.4.3",
     "mocha": "^8.1.3",
     "nyc": "^15.1.0",
     "pg-promise": "^10.6.2",

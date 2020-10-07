@@ -7,7 +7,7 @@ function sql(file) {
     return new QueryFile(fullPath, { minify: true });
 }
 module.exports = (cursorTableName, cursorPK, qTableName, schema, queryVersionFunctionname) => ({
-    "TransactionLock": new PreparedStatement({ name: 'Q-TransactionLock', text: `SELECT pg_try_advisory_xact_lock(hashtext($1)) as "Locked";` }),
+    "TransactionLock": new PreparedStatement({ name: 'Q-TransactionLock', text: `SELECT pg_advisory_xact_lock(hashtext($1)) as "Locked";` }),
     "Deque": new PreparedStatement({
         name: 'Q-Deque', text: pgPromise.as.format(`INSERT INTO $[cursorTableName:name] ("Timestamp","Serial","CursorId","Ack")
     SELECT "Q"."Timestamp","Q"."Serial",$1,0

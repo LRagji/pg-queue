@@ -20,6 +20,9 @@ A complete example can be found at [here](https://raw.githubusercontent.com/LRag
 1. **Initialize**
 ```javascript
 const QType = require('pg-que');
+const pgp = require('pg-promise')();
+pgp.pg.types.setTypeParser(20, BigInt); // This is for serialization bug of BigInts as strings.
+pgp.pg.types.setTypeParser(1114, str => str); // UTC Timestamp Formatting Bug, 1114 is OID for timestamp in Postgres.
 const defaultConectionString = "postgres://postgres:@localhost:5432/pg-queue";
 const readConfigParams = {
     connectionString: defaultConectionString,
@@ -32,7 +35,7 @@ const writeConfigParams = {
     max: 2 //2 Writer
 };
 const Qname = "Laukik";
-const Q = new QType(Qname, readConfigParams, writeConfigParams);
+const Q = new QType(Qname, pgp(readConfigParams), pgp(writeConfigParams));
 ```
 
 2. **Enqueue**
@@ -48,10 +51,6 @@ const payload = await Q.tryDeque();
 const payload = await Q.tryDeque();
 const acked = await Q.tryAcknowledge(payload.AckToken);
 console.log(acked);
-```
-5. **Dispose**
-```javascript
-Q.dispose();//Releases all resources including connections.
 ```
 
 ## Theory
@@ -84,7 +83,7 @@ Mode 1: Simple Que with multiple publishers and multiple subscribers and message
 2. Raise a Pull Request.
 
 ## Current Version:
-0.0.4[Beta]
+0.0.5[Beta]
 
 ## License
 

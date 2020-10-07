@@ -1,5 +1,4 @@
 const queries = require('./sql/queries');
-const pg = require('pg-promise')
 const crypto = require('crypto');
 const schemaVersion = "0.0.1";
 const serializationError = '40001';
@@ -18,31 +17,14 @@ module.exports = class PgQueue {
     #qGCCounter = 0;
     #qCleanThreshhold = 100;
     #queries;
-    #pgp;
     #serializeTransactionMode;
 
-    static checkForSimilarConnection(aConfigParams, bConfigParams, aConnection, newConnectionCallback) {
-        if (aConfigParams === bConfigParams) {
-            return aConnection;
-        }
-        else {
-            return newConnectionCallback(bConfigParams);
-        }
-    }
-
-    constructor(name, readerPG, writerPG, schema = 'public', cleanQAfter = 10) {
+    constructor(name, readerPG, writerPG, cleanQAfter = 10) {
+        this.#readerPG = readerPG;
+        this.#writerPG = writerPG;
         this.#cursorId = 1;
-        const initOptions = {
-            // query(e) {
-            //     console.log(e.query);
-            // },
-            "schema": schema
-        };
-        this.#pgp = pg(initOptions);
-        this.#pgp.pg.types.setTypeParser(20, BigInt); // This is for serialization bug of BigInts as strings.
-        this.#pgp.pg.types.setTypeParser(1114, str => str); // UTC Timestamp Formatting Bug, 1114 is OID for timestamp in Postgres.
-        this.#serializeTransactionMode = new this.#pgp.txMode.TransactionMode({
-            tiLevel: this.#pgp.txMode.isolationLevel.serializable,
+        this.#serializeTransactionMode = new this.#writerPG.$config.pgp.txMode.TransactionMode({
+            tiLevel: this.#writerPG.$config.pgp.txMode.isolationLevel.serializable,
             readOnly: false,
             deferrable: false
         });
@@ -52,41 +34,36 @@ module.exports = class PgQueue {
         this.#CursorTableName = "C-" + this.name;
         this.#CursorTablePKName = this.#CursorTableName + "-PK";
         this.#VersionFuncName = "QVF-" + this.name;
-        this.#queries = queries(this.#CursorTableName, this.#CursorTablePKName, this.#QTableName, schema, this.#VersionFuncName);
+        this.#queries = queries(this.#CursorTableName, this.#CursorTablePKName, this.#QTableName, (this.#readerPG.$config.options.schema || 'public'), this.#VersionFuncName);
         this.enque = this.enque.bind(this);
         this.tryDeque = this.tryDeque.bind(this);
         this.tryAcknowledge = this.tryAcknowledge.bind(this);
-        this.dispose = this.dispose.bind(this);
         this.#initialize = this.#initialize.bind(this);
-        this.#readerPG = this.#pgp(readerPG);
-        this.#writerPG = PgQueue.checkForSimilarConnection(readerPG, writerPG, this.#readerPG, (c) => this.#pgp(c));
     }
 
     #initialize = async (version) => {
         if (this.#schemaInitialized === true) return;
-        let someVersionExists = await this.#readerPG.one(this.#queries.VersionFunctionExists);
-        if (someVersionExists.exists === true) {
-            const existingVersion = await this.#readerPG.one(this.#queries.CheckSchemaVersion);
-            if (existingVersion.QueueVersion === version) {
-                this.#schemaInitialized = true;
-                return;
-            }
-        }
 
         await this.#writerPG.tx(async transaction => {
-            let acquired = await transaction.one(this.#queries.TransactionLock, [("Q" + version)]);
-            if (acquired.Locked === true) {
-                for (let idx = 0; idx < this.#queries["Schema0.0.1"].length; idx++) {
-                    let step = this.#queries["Schema0.0.1"][idx];
-                    step.params.push(this.#QTableName);
-                    step.params.push(this.#CursorTableName);
-                    step.params.push(this.#CursorTablePKName);
-                    step.params.push(version);
-                    step.params.push(this.#VersionFuncName);
-                    await transaction.none(step.file, step.params);
-                };
+            await transaction.one(this.#queries.TransactionLock, [("Q" + version)]);
+            let someVersionExists = await this.#readerPG.one(this.#queries.VersionFunctionExists);
+            if (someVersionExists.exists === true) {
+                const existingVersion = await this.#readerPG.one(this.#queries.CheckSchemaVersion);
+                if (existingVersion.QueueVersion === version) {
+                    this.#schemaInitialized = true;
+                    return;
+                }
+            }
+
+            for (let idx = 0; idx < this.#queries["Schema0.0.1"].length; idx++) {
+                let step = this.#queries["Schema0.0.1"][idx];
+                step.params.push(this.#QTableName);
+                step.params.push(this.#CursorTableName);
+                step.params.push(this.#CursorTablePKName);
+                step.params.push(version);
+                step.params.push(this.#VersionFuncName);
+                await transaction.none(step.file, step.params);
             };
-            return;
         });
         this.#schemaInitialized = true;
     }
@@ -96,9 +73,9 @@ module.exports = class PgQueue {
 
         await this.#initialize(schemaVersion);
         payloads = payloads.map(e => ({ "Payload": e }));
-        const qTable = new this.#pgp.helpers.TableName({ "table": this.#QTableName });
-        const columnDef = new this.#pgp.helpers.ColumnSet(["Payload:json"], { table: qTable });
-        const query = this.#pgp.helpers.insert(payloads, columnDef);
+        const qTable = new this.#writerPG.$config.pgp.helpers.TableName({ "table": this.#QTableName });
+        const columnDef = new this.#writerPG.$config.pgp.helpers.ColumnSet(["Payload:json"], { table: qTable });
+        const query = this.#writerPG.$config.pgp.helpers.insert(payloads, columnDef);
         await this.#writerPG.none(query);
         this.#qGCCounter++;
         if (this.#qGCCounter >= this.#qCleanThreshhold) {
@@ -201,10 +178,6 @@ module.exports = class PgQueue {
             return message[0].Token === token;
         }
         return false;
-    }
-
-    dispose() {
-        this.#pgp.end();
     }
 }
 //Why cant this be done with pg-cursors? Cursors are session lived object not available across connections(Even WITH HOLD).
