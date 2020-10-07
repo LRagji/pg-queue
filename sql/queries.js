@@ -2,14 +2,16 @@ const path = require('path');
 const pgPromise = require('pg-promise');
 const QueryFile = require('pg-promise').QueryFile;
 const PreparedStatement = require('pg-promise').PreparedStatement;
+const crypto = require('crypto');
+const getUniqueName = (params) => crypto.createHash('md5').update(params.join(".")).digest('hex');
 function sql(file) {
     const fullPath = path.join(__dirname, file); // generating full path;
     return new QueryFile(fullPath, { minify: true });
 }
 module.exports = (cursorTableName, cursorPK, qTableName, schema, queryVersionFunctionname) => ({
-    "TransactionLock": new PreparedStatement({ name: 'Q-TransactionLock', text: `SELECT pg_advisory_xact_lock(hashtext($1)) as "Locked";` }),
+    "TransactionLock": new PreparedStatement({ name: getUniqueName(['Q-TransactionLock']), text: `SELECT pg_advisory_xact_lock(hashtext($1)) as "Locked";` }),
     "Deque": new PreparedStatement({
-        name: 'Q-Deque', text: pgPromise.as.format(`INSERT INTO $[cursorTableName:name] ("Timestamp","Serial","CursorId","Ack")
+        name: getUniqueName(['Q-Deque', cursorTableName, cursorPK, qTableName]), text: pgPromise.as.format(`INSERT INTO $[cursorTableName:name] ("Timestamp","Serial","CursorId","Ack")
     SELECT "Q"."Timestamp","Q"."Serial",$1,0
     FROM $[qTableName:name] AS "Q" 
     JOIN (
@@ -39,24 +41,24 @@ module.exports = (cursorTableName, cursorPK, qTableName, schema, queryVersionFun
     "Token"= (floor(random()*(10000000-0+1))+0)
     RETURNING *`, { "cursorTableName": cursorTableName, "cursorPK": cursorPK, "qTableName": qTableName })
     }),
-    "Ack": new PreparedStatement({ name: 'Q-Ack', text: pgPromise.as.format(`UPDATE $[cursorTableName:name] SET "Ack"=1 WHERE "CursorId"=$1 AND "Token"=$2 RETURNING *`, { "cursorTableName": cursorTableName }) }),
+    "Ack": new PreparedStatement({ name: getUniqueName(['Q-Ack', cursorTableName]), text: pgPromise.as.format(`UPDATE $[cursorTableName:name] SET "Ack"=1 WHERE "CursorId"=$1 AND "Token"=$2 RETURNING *`, { "cursorTableName": cursorTableName }) }),
     "TimeoutSnatch": new PreparedStatement({
-        name: 'Q-TimeoutSnatch', text: pgPromise.as.format(`UPDATE $[cursorTableName:name] SET
+        name: getUniqueName(['Q-TimeoutSnatch', cursorTableName]), text: pgPromise.as.format(`UPDATE $[cursorTableName:name] SET
     "Fetched"= NOW() AT TIME ZONE 'UTC',
     "Token"= (floor(random()*(10000000-0+1))+0)
     WHERE "CursorId"=$1 AND "Ack"=0 AND ((NOW() AT TIME ZONE 'UTC')-"Fetched") > ($2 * INTERVAL '1 Second')
     RETURNING *`, { "cursorTableName": cursorTableName })
     }),
-    "ClearQ": new PreparedStatement({ name: 'Q-ClearQ', text: pgPromise.as.format(`DELETE FROM $[qTableName:name] WHERE "Timestamp" < (SELECT "Timestamp" FROM $[cursorTableName:name] ORDER BY "Timestamp" LIMIT 1 )`, { "cursorTableName": cursorTableName, "qTableName": qTableName }) }),
-    "FetchPayload": new PreparedStatement({ name: 'Q-FetchPayload', text: pgPromise.as.format(`SELECT "Payload" FROM $[qTableName:name] WHERE "Timestamp"=$1 AND "Serial"=$2`, { "qTableName": qTableName }) }),
+    "ClearQ": new PreparedStatement({ name: getUniqueName(['Q-ClearQ', cursorTableName, qTableName]), text: pgPromise.as.format(`DELETE FROM $[qTableName:name] WHERE "Timestamp" < (SELECT "Timestamp" FROM $[cursorTableName:name] ORDER BY "Timestamp" LIMIT 1 )`, { "cursorTableName": cursorTableName, "qTableName": qTableName }) }),
+    "FetchPayload": new PreparedStatement({ name: getUniqueName(['Q-FetchPayload', qTableName]), text: pgPromise.as.format(`SELECT "Payload" FROM $[qTableName:name] WHERE "Timestamp"=$1 AND "Serial"=$2`, { "qTableName": qTableName }) }),
     "VersionFunctionExists": new PreparedStatement({
-        name: 'Q-VersionFunctionExists', text: pgPromise.as.format(`SELECT EXISTS(
+        name: getUniqueName(['Q-VersionFunctionExists', queryVersionFunctionname]), text: pgPromise.as.format(`SELECT EXISTS(
         SELECT 1 
         FROM pg_catalog.pg_proc p
         LEFT JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace 
         WHERE proname = $[QVF] AND n.nspname::TEXT=$[schema])`, { "schema": schema, "QVF": queryVersionFunctionname })
     }),
-    "CheckSchemaVersion": new PreparedStatement({ name: 'Q-CheckSchemaVersion', text: pgPromise.as.format(`SELECT $[QVF:name]() AS "QueueVersion";`, { "QVF": queryVersionFunctionname }) }),
+    "CheckSchemaVersion": new PreparedStatement({ name: getUniqueName(['Q-CheckSchemaVersion', queryVersionFunctionname]), text: pgPromise.as.format(`SELECT $[QVF:name]() AS "QueueVersion";`, { "QVF": queryVersionFunctionname }) }),
     "Schema0.0.1": [
         {
             "file": sql('./v1/teraform.sql'),
