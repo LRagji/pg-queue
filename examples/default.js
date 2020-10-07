@@ -21,7 +21,7 @@ const writeConfigParams = {
 };
 
 const Qname = "Laukik";
-
+// Awaiting Bug https://github.com/brianc/node-postgres/issues/2363 to move this inside library
 pgp.pg.types.setTypeParser(20, BigInt); // This is for serialization bug of BigInts as strings.
 pgp.pg.types.setTypeParser(1114, str => str); // UTC Timestamp Formatting Bug, 1114 is OID for timestamp in Postgres.
 
