@@ -84,7 +84,7 @@ Mode 1: Simple Que with multiple publishers and multiple subscribers and message
 2. Raise a Pull Request.
 
 ## Current Version:
-0.0.5[Beta]
+0.0.6[Beta]
 
 ## Known issues
 1. Type parsers for pg has to be set inside the package, but this cant be done as it will override the connection object settings, this is a singleton issue highlighted [here](https://github.com/brianc/node-postgres/issues/2363) and awaiting fix for it.
