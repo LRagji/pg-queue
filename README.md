@@ -76,6 +76,7 @@ Mode 1: Simple Que with multiple publishers and multiple subscribers and message
 
 1. Authors :heart: love :heart: for Open Source.
 2. [pg-promise](https://www.npmjs.com/package/pg-promise).
+3. [pg-boot](https://www.npmjs.com/package/pg-boot)
 
 ## Contributions
 

@@ -1,22 +1,22 @@
 const queries = require('./sql/queries');
 const crypto = require('crypto');
-const schemaVersion = "0.0.1";
+const schemaVersion = 0;
 const serializationError = '40001';
-
+const pgBootNS = require("pg-boot");
+const productName = "Q";
 module.exports = class PgQueue {
 
     name;
     #cursorId;
     #readerPG;
     #writerPG;
-    #schemaInitialized = false;
     #QTableName;
     #CursorTableName;
     #CursorTablePKName;
-    #VersionFuncName;
     #qGCCounter = 0;
     #qCleanThreshhold = 100;
     #queries;
+    #pgBoot;
     #serializeTransactionMode;
 
     constructor(name, readerPG, writerPG, cleanQAfter = 10) {
@@ -33,39 +33,31 @@ module.exports = class PgQueue {
         this.#QTableName = "Q-" + this.name;
         this.#CursorTableName = "C-" + this.name;
         this.#CursorTablePKName = this.#CursorTableName + "-PK";
-        this.#VersionFuncName = "QVF-" + this.name;
-        this.#queries = queries(this.#CursorTableName, this.#CursorTablePKName, this.#QTableName, (this.#readerPG.$config.options.schema || 'public'), this.#VersionFuncName);
+        this.#queries = queries(this.#CursorTableName, this.#CursorTablePKName, this.#QTableName);
         this.enque = this.enque.bind(this);
         this.tryDeque = this.tryDeque.bind(this);
         this.tryAcknowledge = this.tryAcknowledge.bind(this);
         this.#initialize = this.#initialize.bind(this);
+        this.#pgBoot = new pgBootNS.PgBoot(productName + name);
     }
 
     #initialize = async (version) => {
-        if (this.#schemaInitialized === true) return;
-
-        await this.#writerPG.tx(async transaction => {
-            await transaction.one(this.#queries.TransactionLock, [("Q" + version)]);
-            let someVersionExists = await this.#readerPG.one(this.#queries.VersionFunctionExists);
-            if (someVersionExists.exists === true) {
-                const existingVersion = await this.#readerPG.one(this.#queries.CheckSchemaVersion);
-                if (existingVersion.QueueVersion === version) {
-                    this.#schemaInitialized = true;
-                    return;
-                }
-            }
-
-            for (let idx = 0; idx < this.#queries["Schema0.0.1"].length; idx++) {
-                let step = this.#queries["Schema0.0.1"][idx];
-                step.params.push(this.#QTableName);
-                step.params.push(this.#CursorTableName);
-                step.params.push(this.#CursorTablePKName);
-                step.params.push(version);
-                step.params.push(this.#VersionFuncName);
-                await transaction.none(step.file, step.params);
+        return this.#pgBoot.checkVersion(this.#writerPG, version, async (transaction, dbVersion) => {
+            switch (dbVersion) {
+                case -1: //First time install
+                    for (let idx = 0; idx < this.#queries["Schema0.0.1"].length; idx++) {
+                        let step = this.#queries["Schema0.0.1"][idx];
+                        step.params.push(this.#QTableName);
+                        step.params.push(this.#CursorTableName);
+                        step.params.push(this.#CursorTablePKName);
+                        await transaction.none(step.file, step.params);
+                    };
+                    break;
+                default:
+                    console.error("Unknown schema version " + dbVersion);
+                    break;
             };
         });
-        this.#schemaInitialized = true;
     }
 
     async enque(payloads) {
