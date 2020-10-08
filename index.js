@@ -45,8 +45,8 @@ module.exports = class PgQueue {
         return this.#pgBoot.checkVersion(this.#writerPG, version, async (transaction, dbVersion) => {
             switch (dbVersion) {
                 case -1: //First time install
-                    for (let idx = 0; idx < this.#queries["Schema0.0.1"].length; idx++) {
-                        let step = this.#queries["Schema0.0.1"][idx];
+                    for (let idx = 0; idx < this.#queries.Schema0.length; idx++) {
+                        let step = this.#queries.Schema0[idx];
                         step.params.push(this.#QTableName);
                         step.params.push(this.#CursorTableName);
                         step.params.push(this.#CursorTablePKName);

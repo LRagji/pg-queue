@@ -7,6 +7,12 @@ function sql(file) {
     const fullPath = path.join(__dirname, file); // generating full path;
     return new QueryFile(fullPath, { minify: true });
 }
+const schema0 = [
+    {
+        "file": sql('./v1/teraform.sql'),
+        "params": []
+    }
+]
 module.exports = (cursorTableName, cursorPK, qTableName) => ({
     "Deque": pgBootNS.PgBoot.dynamicPreparedStatement("Q-Deque", `INSERT INTO $[cursorTableName:name] ("Timestamp","Serial","CursorId","Ack")
     SELECT "Q"."Timestamp","Q"."Serial",$1,0
@@ -45,10 +51,5 @@ module.exports = (cursorTableName, cursorPK, qTableName) => ({
     RETURNING *`, { "cursorTableName": cursorTableName }),
     "ClearQ": pgBootNS.PgBoot.dynamicPreparedStatement('Q-ClearQ', `DELETE FROM $[qTableName:name] WHERE "Timestamp" < (SELECT "Timestamp" FROM $[cursorTableName:name] ORDER BY "Timestamp" LIMIT 1 )`, { "cursorTableName": cursorTableName, "qTableName": qTableName }),
     "FetchPayload": pgBootNS.PgBoot.dynamicPreparedStatement('Q-FetchPayload', `SELECT "Payload" FROM $[qTableName:name] WHERE "Timestamp"=$1 AND "Serial"=$2`, { "qTableName": qTableName }),
-    "Schema0.0.1": [
-        {
-            "file": sql('./v1/teraform.sql'),
-            "params": []
-        }
-    ],
+    "Schema0": schema0,
 })
