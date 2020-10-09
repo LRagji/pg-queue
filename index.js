@@ -47,6 +47,7 @@ module.exports = class PgQueue {
                 case -1: //First time install
                     for (let idx = 0; idx < this.#queries.Schema0.length; idx++) {
                         let step = this.#queries.Schema0[idx];
+                        step.params = [];//Need to reset this as it is a singleton object.
                         step.params.push(this.#QTableName);
                         step.params.push(this.#CursorTableName);
                         step.params.push(this.#CursorTablePKName);
