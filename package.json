@@ -1,8 +1,8 @@
 {
   "name": "pg-que",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Simple Q implementation on postgres.",
-  "main": "index.js",
+  "main": "pg-que.js",
   "scripts": {
     "test": "node examples/default.js > log.txt 2>&1"
   },

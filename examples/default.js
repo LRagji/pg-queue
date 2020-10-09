@@ -1,6 +1,6 @@
 //This example demonstrates multiple publishers with multiple consumers with sequential reads.
 
-const QType = require('../index');
+const QType = require('../pg-que');
 const initOptions = {
     // query(e) {
     //     console.log(e.query);
