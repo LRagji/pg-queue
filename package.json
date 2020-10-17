@@ -13,7 +13,8 @@
   "keywords": [
     "Q",
     "Queue",
-    "PG"
+    "PG",
+    "pgq"
   ],
   "author": "Laukik",
   "license": "SEE LICENSE IN license.md",
