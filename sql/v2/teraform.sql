@@ -62,11 +62,11 @@ DECLARE
 "IsMinimum" BOOLEAN := FALSE;
 BEGIN
 	IF NEW."Page" <> OLD."Page" THEN
-		SELECT MIN("Page")= OLD."Page" INTO "IsMinimum" FROM "Q"."Cursor";
+		SELECT MIN("Page")= OLD."Page" INTO "IsMinimum" FROM $[cursortablename:name];
 		IF "IsMinimum" THEN
-			SELECT 'TRUNCATE '|| quote_ident(TG_TABLE_SCHEMA)||'.' ||quote_ident($[qtablename]|| OLD."Page")
+			SELECT 'TRUNCATE '|| quote_ident(TG_TABLE_SCHEMA)||'.' ||quote_ident($[qtablename] || '-' || OLD."Page")
 			INTO "DSql"
-			FROM "Q"."Cursor";
+			FROM $[cursortablename:name];
 			EXECUTE "DSql";
 		END IF;
 	END IF;
@@ -83,61 +83,13 @@ CREATE TRIGGER $[gctriggername:name] BEFORE UPDATE ON $[cursortablename:name] FO
 
 
 
-
-
-
-
--- --Insert Query
--- INSERT INTO $[qTableName:name] ("Payload","Page")
---     SELECT $1,(SELECT CASE WHEN "WriterShouldBe"="GC" THEN -1 ELSE "WriterShouldBe" END AS "Writer"
---     FROM (
---     SELECT COALESCE(MOD(MAX("Page")+1,$[totalpagesFunctionName:name]()),1) AS "WriterShouldBe",
---     COALESCE(MIN("Page"),$[totalpagesFunctionName:name]()-1) AS "GC"
---     FROM $[cursorTableName:name]
---     )AS "T")
-
-
--- --NEXT
--- —What  happens when the  serial overflows?
--- —What happens when the DB is new?
--- —What  happens when both  timeout and ack evaluate  to true?
--- —What happens  when serial overflows
--- INSERT INTO "Q"."Cursor" ("Serial","Page","CursorId","Ack","Token","Fetched")
--- SELECT "QID"[1] AS "Serial","QID"[2] AS "Page","CursorId","Ack","Token","Fetched"
--- FROM(
--- SELECT
--- 	CASE 
--- 		WHEN "Ack"=1 AND "Serial"=9223372036854775807 THEN (SELECT ARRAY["Serial","Page"] FROM "Q"."Q" WHERE "Serial" > 0 ORDER BY "Serial" ASC LIMIT 1)
--- 		WHEN "Ack"=0 AND ((NOW() AT TIME ZONE 'UTC')-"Cursor"."Fetched") > (10 * INTERVAL '1 Second') THEN ARRAY["Serial","Page"]
--- 		WHEN "Ack"=0 AND ((NOW() AT TIME ZONE 'UTC')-"Cursor"."Fetched") < (10 * INTERVAL '1 Second') THEN ARRAY[-1,-1]
--- 		ELSE (SELECT ARRAY["Serial","Page"] FROM "Q"."Q" WHERE "Serial" > "Cursor"."Serial" ORDER BY "Serial" ASC LIMIT 1)
--- 	END AS "QID",
--- 	 1 AS "CursorId",0 AS "Ack", (floor(random()*(10000000-0+1))+0) AS "Token", NOW() AT TIME ZONE 'UTC' AS "Fetched"
--- FROM (
--- 	SELECT "Serial","Page","Ack", "Fetched","CursorId"
--- 	FROM "Q"."Cursor"
--- 	WHERE "CursorId"=1
--- 	UNION ALL
--- 	SELECT 0,-1,1,NOW() AT TIME ZONE 'UTC',1
--- 	ORDER BY "Serial" DESC
--- 	LIMIT 1
--- ) AS "Cursor"
--- ) AS "Temp"
--- WHERE "QID" IS NOT NULL
--- ON CONFLICT ON CONSTRAINT "Cursor_PKey"
--- DO UPDATE 
--- SET 
--- "Serial"=Excluded."Serial",
--- "Page"=Excluded."Page",
--- "Ack"=Excluded."Ack",
--- "Fetched"=Excluded."Fetched",
--- "Token"= Excluded."Token"
--- WHERE Excluded."Serial" != -1
--- RETURNING *
-
--- —ACK
--- UPDATE "Q"."Cursor"
--- SET "Ack"=1 
--- WHERE "CursorId"=1 
--- AND "Token"=8271913
--- RETURNING *
+-- --Query Tells you page size and rotating tables sizes
+-- SELECT REPLACE(relname, 'Q-7a28fd25d95c0969bff16b963af1c832', 'Page-' ) AS "relation",
+-- pg_size_pretty (pg_table_size (C .oid)) AS "TableSize",
+-- pg_size_pretty (pg_indexes_size (C .oid)) AS "IndexSize",
+-- reltuples AS approximate_row_count
+-- FROM pg_class C
+-- LEFT JOIN pg_namespace N ON (N.oid = C .relnamespace)
+-- WHERE relname like 'Q-7a28fd25d95c0969bff16b963af1c832%'
+-- AND C .relkind ='r' AND pg_total_relation_size (C .oid) > 16384 --16KB is  the default space a table takes
+-- ORDER BY pg_total_relation_size (C .oid) DESC 

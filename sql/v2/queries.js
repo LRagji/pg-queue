@@ -10,49 +10,49 @@ const schema1 = [//This needs to be a constant as multiple instances of the same
     sql('./teraform.sql')
 ]
 module.exports = (cursorTableName, cursorPK, qTableName, totalPagesFunctionName) => ({
-    "Deque": pgBootNS.PgBoot.dynamicPreparedStatement("Q-Deque", `INSERT INTO $[cursorTableName:name] ("Timestamp","Serial","CursorId","Ack")
-    SELECT "Q"."Timestamp","Q"."Serial",$1,0
-    FROM $[qTableName:name] AS "Q" 
-    JOIN (
-        SELECT "Timestamp","Serial"
-        FROM (
-            SELECT "Timestamp","Serial","CursorId","Ack" 
-            FROM $[cursorTableName:name]
-            WHERE "CursorId"=$1
-            UNION ALL
-            SELECT to_timestamp(0) AT TIME ZONE 'UTC',-1,$1,1
-            ORDER BY "Timestamp" DESC
-            LIMIT 1
-        ) as "T"
-        WHERE "Ack"=1
-    ) AS "C" ON TRUE
-    WHERE "Q"."Timestamp" > "C"."Timestamp" OR
-    "Q"."Timestamp" = "C"."Timestamp" AND "Q"."Serial" > "C"."Serial"
-    ORDER BY "Q"."Timestamp","Q"."Serial" 
-    LIMIT 1
+    "Deque": pgPromise.as.format(`
+    CREATE TEMP TABLE "TruncateTriggerIsolation" ON COMMIT DROP AS
+    SELECT "QID"[1] AS "Serial","QID"[2] AS "Page","CursorId","Ack","Token","Fetched"
+    FROM(
+    SELECT
+        CASE 
+            WHEN "Ack"=1 AND "Serial"=9223372036854775807 THEN (SELECT ARRAY["Serial","Page"] FROM $[qTableName:name] WHERE "Serial" > 0 ORDER BY "Serial" ASC LIMIT 1)
+            WHEN "Ack"=0 AND ((NOW() AT TIME ZONE 'UTC')-"Cursor"."Fetched") > ($1 * INTERVAL '1 Second') THEN ARRAY["Serial","Page"]
+            WHEN "Ack"=0 AND ((NOW() AT TIME ZONE 'UTC')-"Cursor"."Fetched") < ($1 * INTERVAL '1 Second') THEN ARRAY[-1,-1]
+            ELSE (SELECT ARRAY["Serial","Page"] FROM $[qTableName:name] WHERE "Serial" > "Cursor"."Serial" ORDER BY "Serial" ASC LIMIT 1)
+        END AS "QID",
+        "Cursor"."CursorId",0 AS "Ack", (floor(random()*(10000000-0+1))+0) AS "Token", NOW() AT TIME ZONE 'UTC' AS "Fetched"
+    FROM (
+        SELECT "Serial","Page","Ack", "Fetched","CursorId"
+        FROM $[cursorTableName:name]
+        WHERE "CursorId"=$2
+        UNION ALL
+        SELECT 0,-1,1,NOW() AT TIME ZONE 'UTC',$2
+        ORDER BY "Serial" DESC
+        LIMIT 1
+    ) AS "Cursor"
+    ) AS "Temp"
+    WHERE "QID" IS NOT NULL;
+    INSERT INTO $[cursorTableName:name] ("Serial","Page","CursorId","Ack","Token","Fetched")
+    SELECT "Serial","Page","CursorId","Ack","Token","Fetched" FROM "TruncateTriggerIsolation"
     ON CONFLICT ON CONSTRAINT $[cursorPK:name]
     DO UPDATE 
     SET 
-    "Timestamp"=Excluded."Timestamp",
     "Serial"=Excluded."Serial",
+    "Page"=Excluded."Page",
     "Ack"=Excluded."Ack",
-    "Fetched"= NOW() AT TIME ZONE 'UTC',
-    "Token"= (floor(random()*(10000000-0+1))+0)
-    RETURNING *`, { "cursorTableName": cursorTableName, "cursorPK": cursorPK, "qTableName": qTableName }),
+    "Fetched"=Excluded."Fetched",
+    "Token"= Excluded."Token"
+    WHERE Excluded."Serial" != -1
+    RETURNING *;`, { "cursorTableName": cursorTableName, "cursorPK": cursorPK, "qTableName": qTableName }),
     "Ack": pgBootNS.PgBoot.dynamicPreparedStatement('Q-Ack', `UPDATE $[cursorTableName:name] SET "Ack"=1 WHERE "CursorId"=$1 AND "Token"=$2 RETURNING *`, { "cursorTableName": cursorTableName }),
-    "TimeoutSnatch": pgBootNS.PgBoot.dynamicPreparedStatement('Q-TimeoutSnatch', `UPDATE $[cursorTableName:name] SET
-    "Fetched"= NOW() AT TIME ZONE 'UTC',
-    "Token"= (floor(random()*(10000000-0+1))+0)
-    WHERE "CursorId"=$1 AND "Ack"=0 AND ((NOW() AT TIME ZONE 'UTC')-"Fetched") > ($2 * INTERVAL '1 Second')
-    RETURNING *`, { "cursorTableName": cursorTableName }),
-    "ClearQ": pgBootNS.PgBoot.dynamicPreparedStatement('Q-ClearQ', `DELETE FROM $[qTableName:name] WHERE "Timestamp" < (SELECT "Timestamp" FROM $[cursorTableName:name] ORDER BY "Timestamp" LIMIT 1 )`, { "cursorTableName": cursorTableName, "qTableName": qTableName }),
-    "FetchPayload": pgBootNS.PgBoot.dynamicPreparedStatement('Q-FetchPayload', `SELECT "Payload" FROM $[qTableName:name] WHERE "Timestamp"=$1 AND "Serial"=$2`, { "qTableName": qTableName }),
-    "Schema1": schema1,
-    "enqueue": pgBootNS.PgBoot.dynamicPreparedStatement('Q-Enqueue', `INSERT INTO $[qTableName:name] ("Payload","Page")
+    "FetchPayload": pgBootNS.PgBoot.dynamicPreparedStatement('Q-FetchPayload', `SELECT "Payload" FROM $[qTableName:name] WHERE "Page"=$1 AND "Serial"=$2`, { "qTableName": qTableName }),
+    "Enqueue": pgBootNS.PgBoot.dynamicPreparedStatement('Q-Enqueue', `INSERT INTO $[qTableName:name] ("Payload","Page")
     SELECT $1,(SELECT CASE WHEN "WriterShouldBe"="GC" THEN -1 ELSE "WriterShouldBe" END AS "Writer"
     FROM (
     SELECT COALESCE(MOD(MAX("Page")+1,$[totalpagesFunctionName:name]()),1) AS "WriterShouldBe",
     COALESCE(MIN("Page"),$[totalpagesFunctionName:name]()-1) AS "GC"
     FROM $[cursorTableName:name]
     )AS "T")`, { "cursorTableName": cursorTableName, "qTableName": qTableName, "totalpagesFunctionName": totalPagesFunctionName }),
+    "Schema1": schema1
 })

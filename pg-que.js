@@ -4,6 +4,7 @@ const schemaVersion = 2;
 const serializationError = '40001';
 const pgBootNS = require("pg-boot");
 const productName = "Q";
+
 module.exports = class PgQueue {
 
     name;
@@ -20,7 +21,7 @@ module.exports = class PgQueue {
         if (readerPG == undefined) throw new Error("Invalid parameter readerPG, should be a valid database connection");
         if (writerPG == undefined) throw new Error("Invalid parameter writerPG, should be a valid database connection");
         if (name == undefined || typeof name != "string" || name.length < 3) throw new Error("Invalid parameter name, should be a string with length between 3 to 20");
-        
+
         this.#readerPG = readerPG;
         this.#writerPG = writerPG;
         this.#cursorId = 1;
@@ -52,7 +53,7 @@ module.exports = class PgQueue {
                     for (let idx = 0; idx < this.#queries.Schema1.length; idx++) {
                         let step = this.#queries.Schema1[idx];
                         let stepParams = {
-                            "pagesfunctionname": existingQuePagesFunctionName,
+                            "pagesfunctionname": ExistingQuePagesFunctionName,
                             "totalpages": this.pages,
                             "qtablename": QTableName,
                             "cursortablename": CursorTableName,
@@ -81,9 +82,9 @@ module.exports = class PgQueue {
         if (Array.isArray(payloads) === false || payloads.length > 40000) throw new Error("Invalid parameter payloads, expecting array of payloads not more than 40k");
 
         await this.#initialize(schemaVersion);
-       
+
         await this.#writerPG.tx((transaction) => {
-            payloads.map((p) => transaction.none(this.#queries.enqueue, p));
+            payloads.map((p) => transaction.none(this.#queries.Enqueue, [p]));
             return transaction.batch;
         });
         //TODO Handle QUE FULL scenario(When Multiple cursors)
@@ -100,32 +101,10 @@ module.exports = class PgQueue {
 
         let message;
         while (retry > 0) {
-            //Try for timed out messages
             try {
                 let mode = this.#serializeTransactionMode;
                 message = await this.#writerPG.tx({ mode }, transaction => {
-                    return transaction.any(this.#queries.TimeoutSnatch, [this.#cursorId, messageAcquiredTimeout]);
-                })
-            }
-            catch (err) {
-                if (err.code === serializationError)//Serialization error
-                {
-                    continue;
-                }
-                else {
-                    throw err;
-                }
-            }
-            if (message !== undefined && message.length > 0) {
-                retry = 0;
-                continue;
-            }
-
-            //Try acquiring new messages
-            try {
-                let mode = this.#serializeTransactionMode;
-                message = await this.#writerPG.tx({ mode }, transaction => {
-                    return transaction.any(this.#queries.Deque, [this.#cursorId]);
+                    return transaction.any(this.#queries.Deque, [messageAcquiredTimeout, this.#cursorId]);
                 });
                 retry = 0;
             }
@@ -138,13 +117,15 @@ module.exports = class PgQueue {
                     throw err;
                 }
             }
-            retry--;
+            finally {
+                retry--;
+            }
         }
-        if (message.length <= 0) return undefined;
+        if (message == undefined || message.length <= 0) return undefined;
         message = message[0];
-        let payload = await this.#readerPG.one(this.#queries.FetchPayload, [message.Timestamp, message.Serial]);
+        let payload = await this.#readerPG.one(this.#queries.FetchPayload, [message.Page, message.Serial]);
         return {
-            "Id": { "T": message.Timestamp, "S": message.Serial },
+            "Id": { "P": message.Page, "S": message.Serial },
             "AckToken": message.Token,
             "Payload": payload.Payload
         }
@@ -168,18 +149,20 @@ module.exports = class PgQueue {
             catch (err) {
                 if (err.code === serializationError)//Serialization error
                 {
-                    retry--;
                     continue;
                 }
                 else {
                     throw err;
                 }
             }
+            finally {
+                retry--;
+            }
         }
         if (message.length < 1 && retry === -100) {//We were sucessfull but no results
             throw new Error("Cannot acknowledge payload, cause someone else may have processed it owning to timeout(STW). Token:" + token)
         }
-        else if (message.length > 0) {
+        else if (message != undefined && message.length > 0) {
             return message[0].Token === token;
         }
         return false;
