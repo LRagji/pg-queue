@@ -88,14 +88,13 @@ CREATE TRIGGER $[gctriggername:name] BEFORE UPDATE ON $[cursortablename:name] FO
 
 
 -- --Insert Query
--- INSERT INTO "Q"."Q" ("Page")
--- SELECT (SELECT CASE WHEN "WriterShouldBe"="GC" THEN -1 ELSE "WriterShouldBe" END AS "Writer"
--- FROM (
--- SELECT COALESCE(MOD(MAX("Page")+1,"Q"."Q-Pages"()),1)  AS "WriterShouldBe",
--- COALESCE(MIN("Page"),"MyQue-Pages"()-1) AS "GC"
--- FROM "Q"."Cursor"
--- ) as "Temp")
--- FROM generate_series(0,100) as x
+-- INSERT INTO $[qTableName:name] ("Payload","Page")
+--     SELECT $1,(SELECT CASE WHEN "WriterShouldBe"="GC" THEN -1 ELSE "WriterShouldBe" END AS "Writer"
+--     FROM (
+--     SELECT COALESCE(MOD(MAX("Page")+1,$[totalpagesFunctionName:name]()),1) AS "WriterShouldBe",
+--     COALESCE(MIN("Page"),$[totalpagesFunctionName:name]()-1) AS "GC"
+--     FROM $[cursorTableName:name]
+--     )AS "T")
 
 
 -- --NEXT

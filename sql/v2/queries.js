@@ -9,7 +9,7 @@ function sql(file) {
 const schema1 = [//This needs to be a constant as multiple instances of the same object will create multiple handles for the same file so this is singleton
     sql('./teraform.sql')
 ]
-module.exports = (cursorTableName, cursorPK, qTableName) => ({
+module.exports = (cursorTableName, cursorPK, qTableName, totalPagesFunctionName) => ({
     "Deque": pgBootNS.PgBoot.dynamicPreparedStatement("Q-Deque", `INSERT INTO $[cursorTableName:name] ("Timestamp","Serial","CursorId","Ack")
     SELECT "Q"."Timestamp","Q"."Serial",$1,0
     FROM $[qTableName:name] AS "Q" 
@@ -48,4 +48,11 @@ module.exports = (cursorTableName, cursorPK, qTableName) => ({
     "ClearQ": pgBootNS.PgBoot.dynamicPreparedStatement('Q-ClearQ', `DELETE FROM $[qTableName:name] WHERE "Timestamp" < (SELECT "Timestamp" FROM $[cursorTableName:name] ORDER BY "Timestamp" LIMIT 1 )`, { "cursorTableName": cursorTableName, "qTableName": qTableName }),
     "FetchPayload": pgBootNS.PgBoot.dynamicPreparedStatement('Q-FetchPayload', `SELECT "Payload" FROM $[qTableName:name] WHERE "Timestamp"=$1 AND "Serial"=$2`, { "qTableName": qTableName }),
     "Schema1": schema1,
+    "enqueue": pgBootNS.PgBoot.dynamicPreparedStatement('Q-Enqueue', `INSERT INTO $[qTableName:name] ("Payload","Page")
+    SELECT $1,(SELECT CASE WHEN "WriterShouldBe"="GC" THEN -1 ELSE "WriterShouldBe" END AS "Writer"
+    FROM (
+    SELECT COALESCE(MOD(MAX("Page")+1,$[totalpagesFunctionName:name]()),1) AS "WriterShouldBe",
+    COALESCE(MIN("Page"),$[totalpagesFunctionName:name]()-1) AS "GC"
+    FROM $[cursorTableName:name]
+    )AS "T")`, { "cursorTableName": cursorTableName, "qTableName": qTableName, "totalpagesFunctionName": totalPagesFunctionName }),
 })

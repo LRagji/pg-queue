@@ -11,9 +11,6 @@ module.exports = class PgQueue {
     #cursorId;
     #readerPG;
     #writerPG;
-    #QTableName;
-    #CursorTableName;
-    #CursorTablePKName;
     #queries;
     #pgBoot;
     #serializeTransactionMode;
@@ -23,6 +20,7 @@ module.exports = class PgQueue {
         if (readerPG == undefined) throw new Error("Invalid parameter readerPG, should be a valid database connection");
         if (writerPG == undefined) throw new Error("Invalid parameter writerPG, should be a valid database connection");
         if (name == undefined || typeof name != "string" || name.length < 3) throw new Error("Invalid parameter name, should be a string with length between 3 to 20");
+        
         this.#readerPG = readerPG;
         this.#writerPG = writerPG;
         this.#cursorId = 1;
@@ -33,20 +31,22 @@ module.exports = class PgQueue {
         });
         this.pages = pages;
         this.name = crypto.createHash('md5').update(name).digest('hex');
-        this.#QTableName = "Q-" + this.name;
-        this.#CursorTableName = "C-" + this.name;
-        this.#CursorTablePKName = this.#CursorTableName + "-PK";
-        this.#queries = queries(this.#CursorTableName, this.#CursorTablePKName, this.#QTableName);
+
         this.enque = this.enque.bind(this);
         this.tryDeque = this.tryDeque.bind(this);
         this.tryAcknowledge = this.tryAcknowledge.bind(this);
         this.#initialize = this.#initialize.bind(this);
+
         this.#pgBoot = new pgBootNS.PgBoot(productName + name);
     }
 
     #initialize = async (version) => {
         return this.#pgBoot.checkVersion(this.#writerPG, version, async (transaction, dbVersion) => {
-            const existingQuePagesFunctionName = "Pages-" + this.name;
+            const ExistingQuePagesFunctionName = "Pages-" + this.name;
+            const QTableName = "Q-" + this.name;
+            const CursorTableName = "C-" + this.name;
+            const CursorTablePKName = CursorTableName + "-PK";
+            this.#queries = queries(CursorTableName, CursorTablePKName, QTableName, ExistingQuePagesFunctionName);
             switch (dbVersion) {
                 case -1: //First time install
                     for (let idx = 0; idx < this.#queries.Schema1.length; idx++) {
@@ -54,9 +54,9 @@ module.exports = class PgQueue {
                         let stepParams = {
                             "pagesfunctionname": existingQuePagesFunctionName,
                             "totalpages": this.pages,
-                            "qtablename": this.#QTableName,
-                            "cursortablename": this.#CursorTableName,
-                            "cursorprimarykeyconstraintname": this.#CursorTablePKName,
+                            "qtablename": QTableName,
+                            "cursortablename": CursorTableName,
+                            "cursorprimarykeyconstraintname": CursorTablePKName,
                             "gctriggerfunctionname": "GCFunc-" + this.name,
                             "gctriggername": "GC-" + this.name,
                         };
@@ -67,8 +67,8 @@ module.exports = class PgQueue {
                     //TODO Update
                     break;
                 case version://Same version 
-                    let results = await transaction.func(existingQuePagesFunctionName);
-                    this.pages = results[0][existingQuePagesFunctionName];
+                    let results = await transaction.func(ExistingQuePagesFunctionName);
+                    this.pages = results[0][ExistingQuePagesFunctionName];
                     break;
                 default:
                     console.error("Unknown schema version " + dbVersion);
@@ -81,11 +81,12 @@ module.exports = class PgQueue {
         if (Array.isArray(payloads) === false || payloads.length > 40000) throw new Error("Invalid parameter payloads, expecting array of payloads not more than 40k");
 
         await this.#initialize(schemaVersion);
-        payloads = payloads.map(e => ({ "Payload": e }));
-        const qTable = new this.#writerPG.$config.pgp.helpers.TableName({ "table": this.#QTableName });
-        const columnDef = new this.#writerPG.$config.pgp.helpers.ColumnSet(["Payload:json"], { table: qTable });
-        const query = this.#writerPG.$config.pgp.helpers.insert(payloads, columnDef);
-        await this.#writerPG.none(query);
+       
+        await this.#writerPG.tx((transaction) => {
+            payloads.map((p) => transaction.none(this.#queries.enqueue, p));
+            return transaction.batch;
+        });
+        //TODO Handle QUE FULL scenario(When Multiple cursors)
         return;
     }
 
