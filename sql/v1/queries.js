@@ -1,7 +1,6 @@
 const path = require('path');
 const pgPromise = require('pg-promise');
 const QueryFile = require('pg-promise').QueryFile;
-const PreparedStatement = require('pg-promise').PreparedStatement;
 const pgBootNS = require("pg-boot");
 function sql(file) {
     const fullPath = path.join(__dirname, file); // generating full path;
@@ -9,7 +8,7 @@ function sql(file) {
 }
 const schema0 = [
     {
-        "file": sql('./v1/teraform.sql'),
+        "file": sql('./teraform.sql'),
         "params": []
     }
 ]

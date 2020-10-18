@@ -1,25 +1,28 @@
-const queries = require('./sql/queries');
+const queries = require('./sql/v2/queries');
 const crypto = require('crypto');
-const schemaVersion = 0;
+const schemaVersion = 2;
 const serializationError = '40001';
 const pgBootNS = require("pg-boot");
 const productName = "Q";
 module.exports = class PgQueue {
 
     name;
+    pages;
     #cursorId;
     #readerPG;
     #writerPG;
     #QTableName;
     #CursorTableName;
     #CursorTablePKName;
-    #qGCCounter = 0;
-    #qCleanThreshhold = 100;
     #queries;
     #pgBoot;
     #serializeTransactionMode;
 
-    constructor(name, readerPG, writerPG, cleanQAfter = 10) {
+    constructor(name, readerPG, writerPG, pages = 20) {
+        if (Number.isNaN(pages) || pages > 20 || pages < 3) throw new Error("Invalid parameter pages, should be between 3 to 20");
+        if (readerPG == undefined) throw new Error("Invalid parameter readerPG, should be a valid database connection");
+        if (writerPG == undefined) throw new Error("Invalid parameter writerPG, should be a valid database connection");
+        if (name == undefined || typeof name != "string" || name.length < 3) throw new Error("Invalid parameter name, should be a string with length between 3 to 20");
         this.#readerPG = readerPG;
         this.#writerPG = writerPG;
         this.#cursorId = 1;
@@ -28,7 +31,7 @@ module.exports = class PgQueue {
             readOnly: false,
             deferrable: false
         });
-        this.#qCleanThreshhold = cleanQAfter;
+        this.pages = pages;
         this.name = crypto.createHash('md5').update(name).digest('hex');
         this.#QTableName = "Q-" + this.name;
         this.#CursorTableName = "C-" + this.name;
@@ -43,16 +46,29 @@ module.exports = class PgQueue {
 
     #initialize = async (version) => {
         return this.#pgBoot.checkVersion(this.#writerPG, version, async (transaction, dbVersion) => {
+            const existingQuePagesFunctionName = "Pages-" + this.name;
             switch (dbVersion) {
                 case -1: //First time install
-                    for (let idx = 0; idx < this.#queries.Schema0.length; idx++) {
-                        let step = this.#queries.Schema0[idx];
-                        step.params = [];//Need to reset this as it is a singleton object.
-                        step.params.push(this.#QTableName);
-                        step.params.push(this.#CursorTableName);
-                        step.params.push(this.#CursorTablePKName);
-                        await transaction.none(step.file, step.params);
+                    for (let idx = 0; idx < this.#queries.Schema1.length; idx++) {
+                        let step = this.#queries.Schema1[idx];
+                        let stepParams = {
+                            "pagesfunctionname": existingQuePagesFunctionName,
+                            "totalpages": this.pages,
+                            "qtablename": this.#QTableName,
+                            "cursortablename": this.#CursorTableName,
+                            "cursorprimarykeyconstraintname": this.#CursorTablePKName,
+                            "gctriggerfunctionname": "GCFunc-" + this.name,
+                            "gctriggername": "GC-" + this.name,
+                        };
+                        await transaction.none(step, stepParams);
                     };
+                    break;
+                case 1: //Version 1
+                    //TODO Update
+                    break;
+                case version://Same version 
+                    let results = await transaction.func(existingQuePagesFunctionName);
+                    this.pages = results[0][existingQuePagesFunctionName];
                     break;
                 default:
                     console.error("Unknown schema version " + dbVersion);
@@ -62,7 +78,7 @@ module.exports = class PgQueue {
     }
 
     async enque(payloads) {
-        if (Array.isArray(payloads) === false) throw new Error("Invalid parameter, expecting array of payloads");
+        if (Array.isArray(payloads) === false || payloads.length > 40000) throw new Error("Invalid parameter payloads, expecting array of payloads not more than 40k");
 
         await this.#initialize(schemaVersion);
         payloads = payloads.map(e => ({ "Payload": e }));
@@ -70,11 +86,6 @@ module.exports = class PgQueue {
         const columnDef = new this.#writerPG.$config.pgp.helpers.ColumnSet(["Payload:json"], { table: qTable });
         const query = this.#writerPG.$config.pgp.helpers.insert(payloads, columnDef);
         await this.#writerPG.none(query);
-        this.#qGCCounter++;
-        if (this.#qGCCounter >= this.#qCleanThreshhold) {
-            await this.#writerPG.none(this.#queries.ClearQ);
-            this.#qGCCounter = 0;
-        }
         return;
     }
 
