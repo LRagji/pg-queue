@@ -60,6 +60,10 @@ module.exports = class PgQueue {
                             "cursorprimarykeyconstraintname": CursorTablePKName,
                             "gctriggerfunctionname": "GCFunc-" + this.name,
                             "gctriggername": "GC-" + this.name,
+                            "dequeuefunctionname": "DQ-" + this.name,
+                            "acknowledgepayloadfunctionname": "ACK-" + this.name,
+                            "trydequeuefunctionname": "TRY-DQ-" + this.name,
+                            "tryacknowledgepayloadfunctionname": "TRY-ACK-" + this.name
                         };
                         await transaction.none(step, stepParams);
                     };
