@@ -236,3 +236,69 @@ $$;
 -- WHERE relname like 'Q-7a28fd25d95c0969bff16b963af1c832%'
 -- AND C .relkind ='r' AND pg_total_relation_size (C .oid) > 16384 --16KB is  the default space a table takes
 -- ORDER BY pg_total_relation_size (C .oid) DESC 
+
+
+BEGIN;
+SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+CREATE TEMP TABLE "TruncateTriggerIsolation" ON COMMIT DROP AS
+WITH "CursorState" AS (
+SELECT "CursorId","QID"[1] AS "Serial","QID"[2] AS "Page","QID"[3] AS "Status",0 AS "Ack",(floor(random()*(10000000-0+1))+0)AS "Token",NOW() AT TIME ZONE 'UTC' AS "Fetched"
+,COALESCE((SELECT MAX("Serial") --This has to consider even the allocated/active serials so a seperate query
+FROM "Q"."C-7a28fd25d95c0969bff16b963af1c832"
+WHERE "CursorId" = ANY (SELECT UNNEST("Cursors") AS "CursorId" FROM "Q"."Subscribers" WHERE "Name"='KIK')),0) as "MaxSerial"
+,ROW_NUMBER() OVER(PARTITION BY "QID"[3]) AS "Id"
+FROM (
+	SELECT "CursorId",
+	COALESCE(
+	(SELECT 
+	CASE --["Serial","Page","PayloadAssignStatus"] 0=Assign New Payload,1= Assign Same,2= Donot Assign
+		WHEN "Ack"=1 AND "Serial"=9223372036854775807 THEN ARRAY[0,-1,0] --ROLLOVER OF Q Table SERIAL CASE, Assign new payload
+		WHEN "Ack"=0 AND ((NOW() AT TIME ZONE 'UTC')-"Fetched") > (10 * INTERVAL '1 Second') THEN ARRAY["Serial","Page",1] --Timeout Case, Assign same payload again
+		WHEN "Ack"=0 AND ((NOW() AT TIME ZONE 'UTC')-"Fetched") < (10 * INTERVAL '1 Second') THEN ARRAY["Serial","Page",2] --Active with cursor, Do not assign
+		ELSE ARRAY["Serial","Page",0]--"Ack"=1 AND "Serial" < Rollover, Assign new payload.
+	END AS "QID"
+	FROM "Q"."C-7a28fd25d95c0969bff16b963af1c832" 
+	WHERE "CursorId"="PC"."CursorId"),ARRAY[0,-1,0]) AS "QID"
+	FROM(
+		SELECT UNNEST("Cursors") AS "CursorId"
+		FROM "Q"."Subscribers"
+		WHERE "Name"='KIK'
+	) AS "PC"--PotentialCursors
+)AS  "CS" --"CursorsState"
+WHERE "QID"[3] != 2--These status ones are active and we dont want them to be included in further calculation they were only used for not generating ground zero state
+)
+,"NextCursors" AS(
+	SELECT "Q"."Serial","Q"."Page",
+	ROW_NUMBER() OVER() AS "Id"
+	FROM "Q"."Q-7a28fd25d95c0969bff16b963af1c832" AS "Q"
+	WHERE "Q"."Serial" > (SELECT "MaxSerial" FROM "CursorState" LIMIT 1)
+	LIMIT CASE WHEN TRUE THEN COALESCE((SELECT COUNT(1) FROM "CursorState" WHERE "Status"=0),0) END
+)
+SELECT "CursorId","Ack","Token","Fetched"
+,CASE WHEN "Status"=1 THEN "CursorState"."Serial" ELSE "NextCursors"."Serial" END AS "Serial"
+,CASE WHEN "Status"=1 THEN "CursorState"."Page" ELSE "NextCursors"."Page" END AS "Page","Status"
+FROM "CursorState" LEFT JOIN "NextCursors" ON "CursorState"."Id" ="NextCursors"."Id";
+
+INSERT INTO "Q"."C-7a28fd25d95c0969bff16b963af1c832" ("Serial","Page","CursorId","Ack","Token","Fetched")
+SELECT "Serial","Page","CursorId","Ack","Token","Fetched" FROM "TruncateTriggerIsolation" ORDER BY "CursorId"
+ON CONFLICT ON CONSTRAINT "C-7a28fd25d95c0969bff16b963af1c832-PK"
+DO UPDATE 
+SET 
+"Serial"=Excluded."Serial",
+"Page"=Excluded."Page",
+"Ack"=Excluded."Ack",
+"Fetched"=Excluded."Fetched",
+"Token"= Excluded."Token"
+RETURNING *;
+
+--COMMIT;
+
+
+
+INSERT INTO "Q"."Subscribers" ("Name","Cursors")
+SELECT 'KIK', ARRAY_AGG(nextval(pg_get_serial_sequence('"Q"."C-7a28fd25d95c0969bff16b963af1c832"', 'CursorId')))
+FROM generate_series(26,10)
+
+UPDATE "Q"."Subscribers"
+SET "Cursors"=(SELECT "Cursors" || 35::BIGINT FROM "Q"."Subscribers" WHERE "Name" ='KIK')
+WHERE "Name" ='KIK'
