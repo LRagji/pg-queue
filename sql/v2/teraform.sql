@@ -11,6 +11,7 @@
 -- trydequeuefunctionname
 -- tryacknowledgepayloadfunctionname
 -- subscriberstablename
+-- subscriberregistrationfunctionname
 
 --This function holds number of pages this Q has(Different Q can have different pages)
 CREATE OR REPLACE FUNCTION $[pagesfunctionname:name]() RETURNS integer IMMUTABLE LANGUAGE SQL AS $$ SELECT $[totalpages] $$;
@@ -90,8 +91,22 @@ $$ ;
 --Trigger for Garbage collection function 
 CREATE TRIGGER $[gctriggername:name] BEFORE UPDATE ON $[cursortablename:name] FOR EACH ROW EXECUTE PROCEDURE $[gctriggerfunctionname:name]();
 
+-- This function registers a subscriber or if the subscriber exists it return MessagesPerBatch for the same.
+CREATE OR REPLACE FUNCTION $[subscriberregistrationfunctionname:name] ("SubscriberName" character(32),"MessagesPerBatch" integer) RETURNS INTEGER
+LANGUAGE PLPGSQL
+AS $$
+BEGIN
+IF NOT EXISTS(SELECT 1 FROM $[subscriberstablename:name] WHERE "Name"="SubscriberName") THEN 
+INSERT INTO $[subscriberstablename:name] ("Name","Cursors")
+SELECT "SubscriberName", ARRAY_AGG(nextval(pg_get_serial_sequence('$[cursortablename:name]', 'CursorId')))
+FROM generate_series(1,"MessagesPerBatch");
+END IF;
+RETURN (SELECT ARRAY_LENGTH("Cursors",1) FROM $[subscriberstablename:name] WHERE "Name"="SubscriberName");
+END
+$$;
+
 --Deque function: Helps to retieve items from the Que should always be called from Serializable transaction to avoid concurrency issues.
-CREATE OR REPLACE FUNCTION $[dequeuefunctionname:name]("SubscriberName" character(33),"TimeoutInSeconds" integer) RETURNS SETOF $[cursortablename:name]
+CREATE OR REPLACE FUNCTION $[dequeuefunctionname:name]("SubscriberName" character(32),"TimeoutInSeconds" integer) RETURNS SETOF $[cursortablename:name]
 LANGUAGE PLPGSQL
 AS $$
 BEGIN
