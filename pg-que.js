@@ -47,6 +47,7 @@ module.exports = class PgQueue {
             const QTableName = "Q-" + this.name;
             const CursorTableName = "C-" + this.name;
             const CursorTablePKName = CursorTableName + "-PK";
+            const SubscriberTableName = "S-" + this.name;
             this.#queries = queries(CursorTableName, CursorTablePKName, QTableName, ExistingQuePagesFunctionName);
             switch (dbVersion) {
                 case -1: //First time install
@@ -57,6 +58,7 @@ module.exports = class PgQueue {
                             "totalpages": this.pages,
                             "qtablename": QTableName,
                             "cursortablename": CursorTableName,
+                            "subscriberstablename": SubscriberTableName,
                             "cursorprimarykeyconstraintname": CursorTablePKName,
                             "gctriggerfunctionname": "GCFunc-" + this.name,
                             "gctriggername": "GC-" + this.name,
