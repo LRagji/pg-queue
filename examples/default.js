@@ -9,11 +9,6 @@ const initOptions = {
 };
 const pgp = require('pg-promise')(initOptions);
 const defaultConectionString = "postgres://postgres:@localhost:5432/QUEUE";
-const readConfigParams = {
-    connectionString: defaultConectionString,
-    application_name: "Example1-Queue-Reader",
-    max: 4 //4 readers
-};
 const writeConfigParams = {
     connectionString: defaultConectionString,
     application_name: "Example1-Queue-Writer",
@@ -24,15 +19,14 @@ const Qname = "Laukik";
 // Awaiting Bug https://github.com/brianc/node-postgres/issues/2363 to move this inside library
 pgp.pg.types.setTypeParser(20, BigInt); // This is for serialization bug of BigInts as strings.
 pgp.pg.types.setTypeParser(1114, str => str); // UTC Timestamp Formatting Bug, 1114 is OID for timestamp in Postgres.
-let pgReader = pgp(readConfigParams);
 let pgWriter = pgp(writeConfigParams);
-const Q = new QType(Qname, pgReader, pgWriter, 3);
-const Q2 = new QType("Output", pgReader, pgWriter);
+const Q = new QType(Qname, pgWriter, 3, { "name": "Secondary", "messagesPerBatch": 3 });
+const Q2 = new QType("Output", pgWriter);
 let publisherHandle;
 
 function publisher() {
     let payloads = [];
-    let ctr = 100;
+    let ctr = 1000;
     while (ctr > 0) {
         payloads.push({ "Counter": ctr });
         ctr--
@@ -46,26 +40,29 @@ function publisher() {
     });
 }
 
-publisher();
-// let reader=async ()=>{
-// let moreDataAvailable = false;
-// do {
-//     const payload = await Q.tryDeque(10);
-//     if (payload == null) {
-//         moreDataAvailable = false;
-//         console.log("No more data");
-//     }
-//     else {
-//         moreDataAvailable = await Q.tryAcknowledge(payload.AckToken);
-//         console.log(`Acked:${moreDataAvailable} Payload:${JSON.stringify(payload, (_, v) => typeof v === 'bigint' ? `${v}n` : v)}`);
-//     }
-// }
-// while (moreDataAvailable)
-// };
-// reader()
-// .then(console.log)
-// .catch(console.error)
+Q.deleteSubscriber().then(console.log).catch(console.error).then(()=>{
 
+publisher();
+let reader = async () => {
+    let moreDataAvailable = false;
+    do {
+        const payload = await Q.tryDeque(10);
+        if (payload == null) {
+            moreDataAvailable = false;
+            console.log("No more data");
+        }
+        else {
+            let result = await Q.tryAcknowledge(payload.map(e => e.AckToken));
+            moreDataAvailable = result.retry === false && result.pending === null;
+            console.log(`Acked:${moreDataAvailable} Payload:${payload.length}`);
+        }
+    }
+    while (moreDataAvailable)
+};
+reader()
+    .then(console.log)
+    .catch(console.error)
+});
 
 // const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
 // const workers = [];

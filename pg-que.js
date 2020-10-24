@@ -9,22 +9,24 @@ module.exports = class PgQueue {
 
     name;
     pages;
-    #cursorId;
-    #readerPG;
+    #subscriber;
     #writerPG;
     #queries;
     #pgBoot;
     #serializeTransactionMode;
+    #dqFunctionName;
+    #ackFunctionName;
 
-    constructor(name, readerPG, writerPG, pages = 20) {
+    constructor(name, writerPG, pages = 20, subscriber = { "name": "Primary", "messagesPerBatch": 1 }) {
         if (Number.isNaN(pages) || pages > 20 || pages < 3) throw new Error("Invalid parameter pages, should be between 3 to 20");
-        if (readerPG == undefined) throw new Error("Invalid parameter readerPG, should be a valid database connection");
         if (writerPG == undefined) throw new Error("Invalid parameter writerPG, should be a valid database connection");
         if (name == undefined || typeof name != "string" || name.length < 3) throw new Error("Invalid parameter name, should be a string with length between 3 to 20");
+        if (subscriber.name == undefined || subscriber.name.length > 32 || subscriber.name.length == 0) throw new Error("Invalid subscriber information 'name' must be string from 1 to 32 chars long.");
+        if (!Number.isNaN(subscriber.messagesPerBatch) && (subscriber.messagesPerBatch > 1000 || Math.ceil(Math.abs(subscriber.messagesPerBatch) || subscriber.messagesPerBatch < 1) !== subscriber.messagesPerBatch)) throw new Error("Invalid subscriber information 'messagesPerBatch' must be whole number from 1 to 1000.");
+        if (Number.isNaN(subscriber.messagesPerBatch)) subscriber.messagesPerBatch = 1;
 
-        this.#readerPG = readerPG;
         this.#writerPG = writerPG;
-        this.#cursorId = 1;
+        this.#subscriber = subscriber;
         this.#serializeTransactionMode = new this.#writerPG.$config.pgp.txMode.TransactionMode({
             tiLevel: this.#writerPG.$config.pgp.txMode.isolationLevel.serializable,
             readOnly: false,
@@ -33,9 +35,10 @@ module.exports = class PgQueue {
         this.pages = pages;
         this.name = crypto.createHash('md5').update(name).digest('hex');
 
-        this.enque = this.enque.bind(this);
+        this.tryEnque = this.tryEnque.bind(this);
         this.tryDeque = this.tryDeque.bind(this);
         this.tryAcknowledge = this.tryAcknowledge.bind(this);
+        this.deleteSubscriber = this.deleteSubscriber.bind(this);
         this.#initialize = this.#initialize.bind(this);
 
         this.#pgBoot = new pgBootNS.PgBoot(productName + name);
@@ -48,7 +51,11 @@ module.exports = class PgQueue {
             const CursorTableName = "C-" + this.name;
             const CursorTablePKName = CursorTableName + "-PK";
             const SubscriberTableName = "S-" + this.name;
-            this.#queries = queries(CursorTableName, CursorTablePKName, QTableName, ExistingQuePagesFunctionName);
+            const SubscriberRegistrationFunctionName = "SR-" + this.name;
+            this.#dqFunctionName = "DQ-" + this.name;
+            this.#ackFunctionName = "ACK-" + this.name;
+            this.#queries = queries(CursorTableName, QTableName, ExistingQuePagesFunctionName, SubscriberTableName);
+            let results;
             switch (dbVersion) {
                 case -1: //First time install
                     for (let idx = 0; idx < this.#queries.Schema1.length; idx++) {
@@ -62,20 +69,25 @@ module.exports = class PgQueue {
                             "cursorprimarykeyconstraintname": CursorTablePKName,
                             "gctriggerfunctionname": "GCFunc-" + this.name,
                             "gctriggername": "GC-" + this.name,
-                            "dequeuefunctionname": "DQ-" + this.name,
-                            "acknowledgepayloadfunctionname": "ACK-" + this.name,
+                            "dequeuefunctionname": this.#dqFunctionName,
+                            "acknowledgepayloadfunctionname": this.#ackFunctionName,
                             "trydequeuefunctionname": "TRY-DQ-" + this.name,
-                            "tryacknowledgepayloadfunctionname": "TRY-ACK-" + this.name
+                            "tryacknowledgepayloadfunctionname": "TRY-ACK-" + this.name,
+                            "subscriberregistrationfunctionname": SubscriberRegistrationFunctionName
                         };
                         await transaction.none(step, stepParams);
                     };
+                    results = await transaction.func(SubscriberRegistrationFunctionName, [this.#subscriber.name, this.#subscriber.messagesPerBatch]);
+                    this.#subscriber.messagesPerBatch = results[0][SubscriberRegistrationFunctionName];
                     break;
                 case 1: //Version 1
                     //TODO Update
                     break;
                 case version://Same version 
-                    let results = await transaction.func(ExistingQuePagesFunctionName);
+                    results = await transaction.func(ExistingQuePagesFunctionName);
                     this.pages = results[0][ExistingQuePagesFunctionName];
+                    results = await transaction.func(SubscriberRegistrationFunctionName, [this.#subscriber.name, this.#subscriber.messagesPerBatch]);
+                    this.#subscriber.messagesPerBatch = results[0][SubscriberRegistrationFunctionName];
                     break;
                 default:
                     console.error("Unknown schema version " + dbVersion);
@@ -84,7 +96,7 @@ module.exports = class PgQueue {
         });
     }
 
-    async enque(payloads) {
+    async tryEnque(payloads) {
         if (Array.isArray(payloads) === false || payloads.length > 40000) throw new Error("Invalid parameter payloads, expecting array of payloads not more than 40k");
 
         await this.#initialize(schemaVersion);
@@ -93,7 +105,7 @@ module.exports = class PgQueue {
             payloads.map((p) => transaction.none(this.#queries.Enqueue, [p]));
             return transaction.batch;
         });
-        //TODO Handle QUE FULL scenario(When Multiple cursors)
+        //TODO Handle QUE FULL scenario(When one cursor is lagging and other cursor is fastest)
         return;
     }
 
@@ -110,7 +122,7 @@ module.exports = class PgQueue {
             try {
                 let mode = this.#serializeTransactionMode;
                 message = await this.#writerPG.tx({ mode }, transaction => {
-                    return transaction.any(this.#queries.Deque, [messageAcquiredTimeout, this.#cursorId]);
+                    return transaction.func(this.#dqFunctionName, [this.#subscriber.name, messageAcquiredTimeout]);
                 });
                 retry = 0;
             }
@@ -128,16 +140,15 @@ module.exports = class PgQueue {
             }
         }
         if (message == undefined || message.length <= 0) return undefined;
-        message = message[0];
-        let payload = await this.#readerPG.one(this.#queries.FetchPayload, [message.Page, message.Serial]);
-        return {
-            "Id": { "P": message.Page, "S": message.Serial },
-            "AckToken": message.Token,
-            "Payload": payload.Payload
-        }
+        return message.map(m => ({
+            "Id": { "P": m.P, "S": m.S },
+            "AckToken": { "T": m.T, "C": m.C },
+            "Payload": m.M
+        }));
+
     }
 
-    async tryAcknowledge(token, retry = 10) {
+    async tryAcknowledge(tokens, retry = 10) {
         retry = parseInt(retry);
         if (Number.isNaN(retry)) throw new Error("Invalid retry count " + retry);
 
@@ -148,9 +159,9 @@ module.exports = class PgQueue {
             try {
                 let mode = this.#serializeTransactionMode;
                 message = await this.#writerPG.tx({ mode }, transaction => {
-                    return transaction.any(this.#queries.Ack, [this.#cursorId, token]);
+                    return transaction.any('SELECT * FROM $1:name($2:json)', [this.#ackFunctionName, tokens]);
                 });
-                retry = -100;
+                retry = 0;
             }
             catch (err) {
                 if (err.code === serializationError)//Serialization error
@@ -165,13 +176,22 @@ module.exports = class PgQueue {
                 retry--;
             }
         }
-        if (message.length < 1 && retry === -100) {//We were sucessfull but no results
-            throw new Error("Cannot acknowledge payload, cause someone else may have processed it owning to timeout(STW). Token:" + token)
-        }
-        else if (message != undefined && message.length > 0) {
-            return message[0].Token === token;
-        }
-        return false;
+        return {
+            "retry": (message == undefined),
+            "pending": (message == undefined) ? undefined : message[0][this.#ackFunctionName]
+        };
+    }
+
+    async deleteSubscriber() {
+        await this.#initialize(schemaVersion);
+
+        let mode = this.#serializeTransactionMode;
+        await this.#writerPG.tx({ mode }, async transaction => {
+            await transaction.none(this.#queries.DeleteSubCursor, [this.#subscriber.name]);
+            await transaction.none(this.#queries.DeleteSub, [this.#subscriber.name]);
+        });
+
+        return true;
     }
 }
 //Why cant this be done with pg-cursors? Cursors are session lived object not available across connections(Even WITH HOLD).
