@@ -8,9 +8,7 @@ function sql(file) {
 const schema1 = [//This needs to be a constant as multiple instances of the same object will create multiple handles for the same file so this is singleton
     sql('./teraform.sql')
 ]
-module.exports = (cursorTableName, qTableName, totalPagesFunctionName, subscribertableName) => ({
-    "DeleteSubCursor": pgBootNS.PgBoot.dynamicPreparedStatement('DeleteSubCursor', 'DELETE FROM $[cursorTableName:name] WHERE "CursorId" = ANY (Select UNNEST("Cursors") FROM $[subscribertableName:name] WHERE "Name"=$1)', { "cursorTableName": cursorTableName, "subscribertableName": subscribertableName }),
-    "DeleteSub": pgBootNS.PgBoot.dynamicPreparedStatement('DeleteSub', 'DELETE FROM $[subscribertableName:name] WHERE "Name"=$1', { "subscribertableName": subscribertableName }),
+module.exports = (cursorTableName, qTableName, totalPagesFunctionName) => ({
     "Enqueue": pgBootNS.PgBoot.dynamicPreparedStatement('Q-Enqueue', `INSERT INTO $[qTableName:name] ("Payload","Page")
     SELECT $1,(SELECT CASE WHEN "WriterShouldBe"="GC" THEN -1 ELSE "WriterShouldBe" END AS "Writer"
     FROM (

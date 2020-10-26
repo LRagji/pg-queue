@@ -12,6 +12,8 @@
 -- tryacknowledgepayloadfunctionname
 -- subscriberstablename
 -- subscriberregistrationfunctionname
+-- qname
+-- deletesubscriberfunctionname
 
 --This function holds number of pages this Q has(Different Q can have different pages)
 CREATE OR REPLACE FUNCTION $[pagesfunctionname:name]() RETURNS integer IMMUTABLE LANGUAGE SQL AS $$ SELECT $[totalpages] $$;
@@ -105,14 +107,18 @@ RETURN (SELECT ARRAY_LENGTH("Cursors",1) FROM $[subscriberstablename:name] WHERE
 END
 $$;
 
---Deque function: Helps to retieve items from the Que should always be called from Serializable transaction to avoid concurrency issues.
+--Deque function: Helps to retieve items from the Que should always be called from transaction to avoid concurrency issues.
 CREATE OR REPLACE FUNCTION $[dequeuefunctionname:name]("SubscriberName" character(32),"TimeoutInSeconds" integer) 
 RETURNS TABLE ("S" BIGINT,  "P" INTEGER,"T" INTEGER, "C" BIGINT,"M" JSONB )
 LANGUAGE PLPGSQL
 AS $$
+DECLARE
+"TruncateTriggerIsolation" JSONB;
+"ConfirmedCusrosrs" JSONB;
 BEGIN
-DROP TABLE IF EXISTS "TruncateTriggerIsolation" CASCADE;
-CREATE TEMP TABLE "TruncateTriggerIsolation" ON COMMIT DROP AS
+
+IF pg_try_advisory_xact_lock(hashtext($[qname]))=FALSE THEN RETURN; END IF;--Guardian of concurrency problem NEEDS A Transaction
+
 WITH "ExpandedCurors" AS(
 	SELECT UNNEST("Cursors") AS "CursorId" 
 	FROM $[subscriberstablename:name]
@@ -147,19 +153,23 @@ WHERE "QID"[3] != 2--These status ones are active and we dont want them to be in
 	WHERE "Q"."Serial" > (SELECT "MaxSerial" FROM "CursorState" LIMIT 1)
 	LIMIT CASE WHEN TRUE THEN COALESCE((SELECT COUNT(1) FROM "CursorState" WHERE "Status"=0),0) END
 )
-SELECT "CursorId","Ack","Token","Fetched"
-,CASE WHEN "Status"=1 THEN "CursorState"."Serial" ELSE "NextCursors"."Serial" END AS "Serial"
-,CASE WHEN "Status"=1 THEN "CursorState"."Page" ELSE "NextCursors"."Page" END AS "Page","Status"
-FROM "CursorState" LEFT JOIN "NextCursors" ON "CursorState"."Id" ="NextCursors"."Id";--LEFT JOIN When all rows have timed out
+SELECT jsonb_agg(jsonpacket) INTO "TruncateTriggerIsolation"
+	FROM (
+			SELECT "CursorId","Ack","Token","Fetched"
+			,CASE WHEN "Status"=1 THEN "CursorState"."Serial" ELSE "NextCursors"."Serial" END AS "Serial"
+			,CASE WHEN "Status"=1 THEN "CursorState"."Page" ELSE "NextCursors"."Page" END AS "Page","Status"
+			FROM "CursorState" LEFT JOIN "NextCursors" ON "CursorState"."Id" ="NextCursors"."Id"--LEFT JOIN When all rows have timed out
+		) as jsonpacket
+	WHERE "Serial" IS NOT NULL AND "Page" IS NOT NULL;-- Join can introduce nulls when no more messages are left in Q
 
+--We need to isolate below insert statement from above CTE as Update statement can trigger GC trigger which will try to truncate Q page and will fail cause of active reference in the query
+--To do that we tried to use TEMP tables problem with them is they are not friendly with SERIALIZED Transactions on Procedures so we have to serial to local variable using JSON.
 
-DROP TABLE IF EXISTS "ConfirmedCusrosrs" CASCADE;
-CREATE TEMP TABLE "ConfirmedCusrosrs" ON COMMIT DROP AS
 WITH "CC" AS (
 	INSERT INTO $[cursortablename:name] ("Serial","Page","CursorId","Ack","Token","Fetched")
 	SELECT "Serial","Page","CursorId","Ack","Token","Fetched" 
-	FROM "TruncateTriggerIsolation"
-	WHERE "Serial" IS NOT NULL AND "Page" IS NOT NULL-- Join can introduce nulls when no more messages are left in Q
+	FROM jsonb_to_recordset("TruncateTriggerIsolation")
+	AS ("Serial" BIGINT,"Page" INTEGER,"CursorId" BIGINT,"Ack" INTEGER,"Token" INTEGER,"Fetched" TIMESTAMP WITHOUT TIME ZONE)
 	ORDER BY "CursorId"
 	ON CONFLICT ON CONSTRAINT $[cursorprimarykeyconstraintname:name]
 	DO UPDATE 
@@ -171,16 +181,19 @@ WITH "CC" AS (
 	"Token"= Excluded."Token"
 	RETURNING *
 )
-SELECT * FROM "CC";
+SELECT jsonb_agg("CC".*) INTO "ConfirmedCusrosrs"
+FROM "CC";
 
-RETURN QUERY SELECT "Serial", "Page", "Token", "ConfirmedCusrosrs"."CursorId", 
-(SELECT "Payload" FROM $[qtablename:name] WHERE "Page"="ConfirmedCusrosrs"."Page" AND "Serial"="ConfirmedCusrosrs"."Serial")--This is required this way only cause serial can be repeating across pages(rollover condition).
-FROM "ConfirmedCusrosrs";
+--Need to keep this also isolated from insert and update statement
+RETURN QUERY SELECT "Serial", "Page", "Token", "CC"."CursorId", 
+(SELECT "Payload" FROM $[qtablename:name] WHERE "Page"="CC"."Page" AND "Serial"="CC"."Serial")--This is required this way only cause serial can be repeating across pages(rollover condition).
+FROM jsonb_to_recordset("ConfirmedCusrosrs")
+AS "CC" ("Serial" BIGINT,"Page" INTEGER,"CursorId" BIGINT,"Ack" INTEGER,"Token" INTEGER,"Fetched" TIMESTAMP WITHOUT TIME ZONE);
 
 END
 $$;
 
---Function to acknowledge a message, should always be called from serialization transaction to avoid concurrency issues.
+--Function to acknowledge a message, should always be called from transaction to avoid concurrency issues.
 CREATE OR REPLACE FUNCTION $[acknowledgepayloadfunctionname:name]("MessagesToAckSerialized" JSONB) 
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -188,6 +201,9 @@ AS $$
 DECLARE
 "Result" JSONB;
 BEGIN
+
+	IF pg_try_advisory_xact_lock(hashtext($[qname]))=FALSE THEN RETURN "MessagesToAckSerialized"; END IF;--Guardian of concurrency problem NEEDS A Transaction
+
 	WITH "MessagesToAck" AS 
 	(
 	SELECT "C" AS "CursorId","T" AS "Token"
@@ -213,60 +229,81 @@ BEGIN
 END
 $$;
 
---Try to dequeue this is a proc as it uses serialized transactions 
-CREATE OR REPLACE PROCEDURE $[trydequeuefunctionname:name](
-	"FetchCursorId" integer,
-	"TimeoutInSeconds" integer,
-	"Attempts" integer  DEFAULT 10,
-	INOUT "Results" JSONB DEFAULT NULL
-)
+--Function to delete a subscriber, should always be called from transaction to avoid concurrency issues.
+CREATE OR REPLACE FUNCTION $[deletesubscriberfunctionname:name]("SubscriberName" character(32)) 
+RETURNS BOOLEAN
 LANGUAGE plpgsql
 AS $$
 DECLARE
-"Continue" boolean :=True;
 BEGIN
-	WHILE "Attempts" > 0 AND "Continue" LOOP
-	COMMIT;--<-- This is just so that it starts a new transaction where i set isolation level
-	SET TRANSACTION ISOLATION LEVEL SERIALIZABLE READ WRITE;
-		BEGIN
-			SELECT $[dequeuefunctionname:name]("FetchCursorId","TimeoutInSeconds") INTO "Results";
-			"Continue":=False;
-		EXCEPTION WHEN SQLSTATE '40001' THEN --<-- Its ok for serialization error to occur, just retry
-		"Continue":=True;
-		RAISE NOTICE 'DQ Retrying %',"Attempts";
-		END;
-		"Attempts":="Attempts"-1;
-	END LOOP;
-	COMMIT;--<-- Final commit and reset the transaction level
+IF pg_try_advisory_xact_lock(hashtext($[qname]))=FALSE THEN RETURN FALSE ; END IF;--Guardian of concurrency problem NEEDS A Transaction
+
+DELETE FROM $[cursortablename:name] WHERE "CursorId" = ANY (Select UNNEST("Cursors") FROM $[subscriberstablename:name] WHERE "Name"="SubscriberName");
+DELETE FROM $[subscriberstablename:name] WHERE "Name"="SubscriberName";
+RETURN TRUE;
 END
 $$;
 
 
---Try to ack payloads this is a proc as it uses serialized transactions 
-CREATE OR REPLACE PROCEDURE $[tryacknowledgepayloadfunctionname:name](
-	INOUT "MessagesToAckSerialized" JSONB DEFAULT NULL,
-	"Attempts" integer  DEFAULT 10
-)
-LANGUAGE plpgsql
-AS $$
-DECLARE
-"Continue" boolean :=True;
-BEGIN
-	WHILE "Attempts" > 0 AND "Continue" LOOP
-	COMMIT;--<-- This is just so that it starts a new transaction where i set isolation level
-	SET TRANSACTION ISOLATION LEVEL SERIALIZABLE READ WRITE;
-		BEGIN
-			SELECT $[acknowledgepayloadfunctionname:name]("MessagesToAckSerialized") INTO "MessagesToAckSerialized";
-			"Continue":=False;
-		EXCEPTION WHEN SQLSTATE '40001' THEN 
-		"Continue":=True;
-		RAISE NOTICE 'Ack Retrying %',"Attempts";
-		END;
-		"Attempts":="Attempts"-1;
-	END LOOP;
-	COMMIT;--<-- Final commit and reset the transaction level
-END
-$$;
+
+
+-------------------------------------------------FOLLOWING FUNCTIONS CAN BE USED DIRECTLY ON PG (NOT USED BY PACKAGE)---------------------------------------------
+
+-- --Try to dequeue this is a proc as it uses serialized transactions 
+-- CREATE OR REPLACE PROCEDURE $[trydequeuefunctionname:name](
+-- 	"SubscriberName" character(32),
+-- 	"TimeoutInSeconds" integer,
+-- 	"Attempts" integer  DEFAULT 10,
+-- 	INOUT "Results" JSONB DEFAULT NULL
+-- )
+-- LANGUAGE plpgsql
+-- AS $$
+-- DECLARE
+-- "Continue" boolean :=True;
+-- BEGIN
+-- 	WHILE "Attempts" > 0 AND "Continue" LOOP
+-- 	COMMIT;--<-- This is just so that it starts a new transaction where i set isolation level
+-- 	SET TRANSACTION ISOLATION LEVEL SERIALIZABLE READ WRITE;
+-- 		BEGIN
+-- 		SELECT jsonb_agg(jsonpacket) INTO "Results"
+-- 		FROM $[dequeuefunctionname:name]("SubscriberName","TimeoutInSeconds") as jsonpacket;
+-- 			"Continue":=False;
+-- 		EXCEPTION WHEN SQLSTATE '40001' THEN --<-- Its ok for serialization error to occur, just retry
+-- 		"Continue":=True;
+-- 		RAISE NOTICE 'DQ Retrying %',"Attempts";
+-- 		END;
+-- 		"Attempts":="Attempts"-1;
+-- 	END LOOP;
+-- 	COMMIT;--<-- Final commit and reset the transaction level
+-- END
+-- $$;
+
+
+-- --Try to ack payloads this is a proc as it uses serialized transactions 
+-- CREATE OR REPLACE PROCEDURE $[tryacknowledgepayloadfunctionname:name](
+-- 	INOUT "MessagesToAckSerialized" JSONB DEFAULT NULL,
+-- 	"Attempts" integer  DEFAULT 10
+-- )
+-- LANGUAGE plpgsql
+-- AS $$
+-- DECLARE
+-- "Continue" boolean :=True;
+-- BEGIN
+-- 	WHILE "Attempts" > 0 AND "Continue" LOOP
+-- 	COMMIT;--<-- This is just so that it starts a new transaction where i set isolation level
+-- 	SET TRANSACTION ISOLATION LEVEL SERIALIZABLE READ WRITE;
+-- 		BEGIN
+-- 			SELECT $[acknowledgepayloadfunctionname:name]("MessagesToAckSerialized") INTO "MessagesToAckSerialized";
+-- 			"Continue":=False;
+-- 		EXCEPTION WHEN SQLSTATE '40001' THEN 
+-- 		"Continue":=True;
+-- 		RAISE NOTICE 'Ack Retrying %',"Attempts";
+-- 		END;
+-- 		"Attempts":="Attempts"-1;
+-- 	END LOOP;
+-- 	COMMIT;--<-- Final commit and reset the transaction level
+-- END
+-- $$;
 
 
 -- --Query Tells you page size and rotating tables sizes
