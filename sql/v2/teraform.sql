@@ -252,7 +252,7 @@ $$;
 --Following proc uses trnsaction control to acquire and release locks be care full to call this function on a seperate connection if required.
 CREATE PROCEDURE $[processprocname:name](
 	"SubscriberName" character(32),
-	"TimeoutInSeconds" integer DEFAULT 10,
+	"TimeoutInSeconds" integer DEFAULT 3600,
 	"Attempts" integer  DEFAULT 10,
 	INOUT "PendingTokensToAck" JSONB DEFAULT NULL
 )

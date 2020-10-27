@@ -4,7 +4,8 @@
   "description": "Simple Q implementation on postgres.",
   "main": "pg-que.js",
   "scripts": {
-    "test": "node examples/default.js > log.txt 2>&1"
+    "test": "node examples/default.js > log.txt 2>&1",
+    "docs": "npx jsdoc pg-que.js --readme ./README.md"
   },
   "repository": {
     "type": "git",
@@ -29,5 +30,8 @@
     "pg-boot": "0.0.3",
     "pg-promise": "^10.6.2",
     "sinon": "^9.1.0"
+  },
+  "devDependencies": {
+    "jsdoc": "^3.6.6"
   }
 }
