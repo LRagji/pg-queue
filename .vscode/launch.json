@@ -5,9 +5,18 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "E-Processing",
+            "program": "${workspaceFolder}/examples/pg-processing.js",
+            "request": "launch",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "type": "pwa-node"
+        },
+        {
             "type": "node",
             "request": "launch",
-            "name": "E-Mode1",
+            "name": "E-Default",
             "skipFiles": [
                 "<node_internals>/**"
             ],

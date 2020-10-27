@@ -6,10 +6,10 @@ const initOptions = {
     // query(e) {
     //     console.log(e.query);
     // },
-    "schema": "Q"
+    "schema": "Warehouse"
 };
 const pgp = require('pg-promise')(initOptions);
-const defaultConectionString = "postgres://postgres:@localhost:5432/QUEUE";
+const defaultConectionString = "postgres://postgres:@localhost:5432/Anukram";
 const writeConfigParams = {
     connectionString: defaultConectionString,
     application_name: "Example1-Queue-Writer",
@@ -63,8 +63,8 @@ function processor() {
         .catch(console.error);
 }
 
-publisher();
-console.log("Publisher Active");
+// publisher();
+// console.log("Publisher Active");
 
 processor();
 console.log("Processor Active");
