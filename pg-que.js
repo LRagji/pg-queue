@@ -68,6 +68,7 @@ module.exports = class PgQueue {
                             "acknowledgepayloadfunctionname": this.#ackFunctionName,
                             "trydequeuefunctionname": "TRY-DQ-" + this.name,
                             "tryacknowledgepayloadfunctionname": "TRY-ACK-" + this.name,
+                            "processprocname": "Process-" + this.name,
                             "subscriberregistrationfunctionname": SubscriberRegistrationFunctionName,
                             "qname": this.name,
                             "deletesubscriberfunctionname": this.#deleteSubFunctionName

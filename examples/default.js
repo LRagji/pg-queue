@@ -52,21 +52,15 @@ function publisher() {
 
 }
 
-Q.tryDeleteSubscriber().then(console.log).catch(console.error)
+//Q.tryDeleteSubscriber().then(console.log).catch(console.error)
 
-//publisher();
+publisher();
 
-// setInterval(() => {
-//     pgWriter.any(`
-//     DO 
-//     $$
-//     BEGIN
-//     CALL "SP"(10);
-//     END 
-//     $$;`)
-//     .then(console.log)
-//     .catch(console.error);
-// }, 1000);
+setInterval(() => {
+    pgWriter.proc("ProcessMyQ", ["Secondary"])
+        .then(console.log)
+        .catch(console.error);
+}, 1000);
 
 let reader = async () => {
     let result;

@@ -14,6 +14,7 @@
 -- subscriberregistrationfunctionname
 -- qname
 -- deletesubscriberfunctionname
+-- processprocname
 
 --This function holds number of pages this Q has(Different Q can have different pages)
 CREATE OR REPLACE FUNCTION $[pagesfunctionname:name]() RETURNS integer IMMUTABLE LANGUAGE SQL AS $$ SELECT $[totalpages] $$;
@@ -98,12 +99,12 @@ CREATE OR REPLACE FUNCTION $[subscriberregistrationfunctionname:name] ("Subscrib
 LANGUAGE PLPGSQL
 AS $$
 BEGIN
-IF NOT EXISTS(SELECT 1 FROM $[subscriberstablename:name] WHERE "Name"="SubscriberName") THEN 
-INSERT INTO $[subscriberstablename:name] ("Name","Cursors")
-SELECT "SubscriberName", ARRAY_AGG(nextval(pg_get_serial_sequence('$[cursortablename:name]', 'CursorId')))
-FROM generate_series(1,"MessagesPerBatch");
-END IF;
-RETURN (SELECT ARRAY_LENGTH("Cursors",1) FROM $[subscriberstablename:name] WHERE "Name"="SubscriberName");
+	IF NOT EXISTS(SELECT 1 FROM $[subscriberstablename:name] WHERE "Name"="SubscriberName") THEN 
+		INSERT INTO $[subscriberstablename:name] ("Name","Cursors")
+		SELECT "SubscriberName", ARRAY_AGG(nextval(pg_get_serial_sequence('$[cursortablename:name]', 'CursorId')))
+		FROM generate_series(1,"MessagesPerBatch");
+	END IF;
+	RETURN (SELECT ARRAY_LENGTH("Cursors",1) FROM $[subscriberstablename:name] WHERE "Name"="SubscriberName");
 END
 $$;
 
@@ -248,64 +249,56 @@ $$;
 
 
 -------------------------------------------------FOLLOWING FUNCTIONS CAN BE USED DIRECTLY ON PG (NOT USED BY PACKAGE)---------------------------------------------
+--Following proc uses trnsaction control to acquire and release locks be care full to call this function on a seperate connection if required.
+CREATE PROCEDURE $[processprocname:name](
+	"SubscriberName" character(32),
+	"TimeoutInSeconds" integer DEFAULT 10,
+	"Attempts" integer  DEFAULT 10,
+	INOUT "PendingTokensToAck" JSONB DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+"Payload" JSONB;
+"PayloadTokensToAck" JSONB;
+"Message" RECORD;
+"ExitOnException" BOOLEAN :=FALSE;
+BEGIN
+	COMMIT;-- <-- Required to start a new transaction for lock
+	BEGIN
+		SELECT jsonb_agg(jsonpacket.*) INTO "Payload"
+		FROM "DQ-7a28fd25d95c0969bff16b963af1c832"('Secondary',10) 
+		AS jsonpacket;-- <-- DQ Payload from Q 
+	EXCEPTION WHEN OTHERS THEN
+	"ExitOnException" := TRUE;
+	END;
+	COMMIT;-- <-- Required to release lock
+	IF "ExitOnException" THEN RETURN; END IF; -- <-- Exit if there is any kind of exception.
+	
+	FOR "Message" IN SELECT * FROM jsonb_to_recordset("Payload") 
+	AS "Temp" ("S" BIGINT,  "P" INTEGER,"T" INTEGER, "C" BIGINT,"M" JSONB )
+	LOOP
+	
+		RAISE NOTICE 'Processed: %',"Message"."M";-- <-- Your Processing Code will go here
+		
+		--Section to extract token out for acks
+		IF "PendingTokensToAck" IS NULL THEN 
+			"PendingTokensToAck" :=  jsonb_build_array(jsonb_build_object('T',"Message"."T",'C',"Message"."C"));
+		ELSE
+			"PendingTokensToAck" := "PendingTokensToAck" || jsonb_build_array(jsonb_build_object('T',"Message"."T",'C',"Message"."C"));
+		END IF;
+	END LOOP;
+	
+	--Following code acks the message.
+	WHILE "PendingTokensToAck" IS NOT NULL AND "Attempts" > 0 LOOP
+		SELECT "ACK-7a28fd25d95c0969bff16b963af1c832"("PendingTokensToAck") INTO "PendingTokensToAck";
+		"Attempts":="Attempts"-1;
+	END LOOP;
+	COMMIT;-- <-- Required to release lock
+END
+$$;
 
--- --Try to dequeue this is a proc as it uses serialized transactions 
--- CREATE OR REPLACE PROCEDURE $[trydequeuefunctionname:name](
--- 	"SubscriberName" character(32),
--- 	"TimeoutInSeconds" integer,
--- 	"Attempts" integer  DEFAULT 10,
--- 	INOUT "Results" JSONB DEFAULT NULL
--- )
--- LANGUAGE plpgsql
--- AS $$
--- DECLARE
--- "Continue" boolean :=True;
--- BEGIN
--- 	WHILE "Attempts" > 0 AND "Continue" LOOP
--- 	COMMIT;--<-- This is just so that it starts a new transaction where i set isolation level
--- 	SET TRANSACTION ISOLATION LEVEL SERIALIZABLE READ WRITE;
--- 		BEGIN
--- 		SELECT jsonb_agg(jsonpacket) INTO "Results"
--- 		FROM $[dequeuefunctionname:name]("SubscriberName","TimeoutInSeconds") as jsonpacket;
--- 			"Continue":=False;
--- 		EXCEPTION WHEN SQLSTATE '40001' THEN --<-- Its ok for serialization error to occur, just retry
--- 		"Continue":=True;
--- 		RAISE NOTICE 'DQ Retrying %',"Attempts";
--- 		END;
--- 		"Attempts":="Attempts"-1;
--- 	END LOOP;
--- 	COMMIT;--<-- Final commit and reset the transaction level
--- END
--- $$;
-
-
--- --Try to ack payloads this is a proc as it uses serialized transactions 
--- CREATE OR REPLACE PROCEDURE $[tryacknowledgepayloadfunctionname:name](
--- 	INOUT "MessagesToAckSerialized" JSONB DEFAULT NULL,
--- 	"Attempts" integer  DEFAULT 10
--- )
--- LANGUAGE plpgsql
--- AS $$
--- DECLARE
--- "Continue" boolean :=True;
--- BEGIN
--- 	WHILE "Attempts" > 0 AND "Continue" LOOP
--- 	COMMIT;--<-- This is just so that it starts a new transaction where i set isolation level
--- 	SET TRANSACTION ISOLATION LEVEL SERIALIZABLE READ WRITE;
--- 		BEGIN
--- 			SELECT $[acknowledgepayloadfunctionname:name]("MessagesToAckSerialized") INTO "MessagesToAckSerialized";
--- 			"Continue":=False;
--- 		EXCEPTION WHEN SQLSTATE '40001' THEN 
--- 		"Continue":=True;
--- 		RAISE NOTICE 'Ack Retrying %',"Attempts";
--- 		END;
--- 		"Attempts":="Attempts"-1;
--- 	END LOOP;
--- 	COMMIT;--<-- Final commit and reset the transaction level
--- END
--- $$;
-
-
+-----------------------------------------------------------------------------DEBUG Section-------------------------------------------------------------------------
 -- --Query Tells you page size and rotating tables sizes
 -- SELECT REPLACE(relname, 'Q-7a28fd25d95c0969bff16b963af1c832', 'Page-' ) AS "relation",
 -- pg_size_pretty (pg_table_size (C .oid)) AS "TableSize",
