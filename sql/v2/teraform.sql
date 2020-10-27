@@ -267,7 +267,7 @@ BEGIN
 	COMMIT;-- <-- Required to start a new transaction for lock
 	BEGIN
 		SELECT jsonb_agg(jsonpacket.*) INTO "Payload"
-		FROM "DQ-7a28fd25d95c0969bff16b963af1c832"('Secondary',10) 
+		FROM "DQ-7a28fd25d95c0969bff16b963af1c832"("SubscriberName","TimeoutInSeconds") 
 		AS jsonpacket;-- <-- DQ Payload from Q 
 	EXCEPTION WHEN OTHERS THEN
 	"ExitOnException" := TRUE;
