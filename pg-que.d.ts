@@ -9,10 +9,15 @@ interface Payload {
     AckToken: number;
     Payload: any;
 }
+interface SubscriberInfo {
+    "name": String,
+    "messagesPerBatch": Integer
+}
 
 export default class PgQueue {
-    constructor(name: string, readerPG: pg.IDatabase<any>, writerPG: pg.IDatabase<any>, pages?: number);
+    constructor(name: string, writerPG: pg.IDatabase<any>, pages?: number, subscriber?: SubscriberInfo);
     enque(payloads: any[]): Promise<void>;
     tryDeque(messageAcquiredTimeout?: number, retry?: number): Promise<Payload>;
-    tryAcknowledge(token:number, retry?: number): Promise<Boolean>;
+    tryAcknowledge(token: number, retry?: number): Promise<Boolean>;
+    tryDeleteSubscriber(): Promise<Boolean>;
 }
