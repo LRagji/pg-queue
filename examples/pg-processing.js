@@ -75,9 +75,9 @@ let Subcriber = async () => {
 publisher();
 console.log("Publisher Active");
 
-Subcriber()
-    .then(console.log)
-    .catch(console.error)
-console.log("Processor Active");
+// Subcriber()
+//     .then(console.log)
+//     .catch(console.error)
+// console.log("Processor Active");
 
 console.log("Press Ctrl+C to stop processing");

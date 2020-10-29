@@ -15,6 +15,7 @@
 -- qname
 -- deletesubscriberfunctionname
 -- schema
+-- enqfunctionname
 
 --This function holds number of pages this Q has(Different Q can have different pages)
 CREATE OR REPLACE FUNCTION $[schema:name].$[pagesfunctionname:name]() RETURNS integer IMMUTABLE LANGUAGE SQL AS $$ SELECT $[totalpages] $$;
@@ -107,6 +108,24 @@ BEGIN
 	RETURN (SELECT ARRAY_LENGTH("Cursors",1) FROM $[schema:name].$[subscriberstablename:name] WHERE "Name"="SubscriberName");
 END
 $$;
+
+--Enque PROC
+CREATE OR REPLACE PROCEDURE $[schema:name].$[enqfunctionname:name]("Payloads" TEXT[])
+LANGUAGE 'plpgsql'
+AS 
+$BODY$ 
+DECLARE
+BEGIN
+	INSERT INTO $[schema:name].$[qtablename:name] ("Payload","Page")
+    SELECT "P"::JSONB,(SELECT CASE WHEN "WriterShouldBe"="GC" THEN -1 ELSE "WriterShouldBe" END AS "Writer"
+    FROM (
+    SELECT COALESCE(MOD(MAX("Page")+1,$[schema:name].$[pagesfunctionname:name]()),1) AS "WriterShouldBe",
+    COALESCE(MIN("Page"),$[schema:name].$[pagesfunctionname:name]()-1) AS "GC"
+    FROM $[schema:name].$[cursortablename:name]
+    )AS "T")
+	FROM UNNEST("Payloads") AS "P";
+END 
+$BODY$;
 
 --Deque function: Helps to retieve items from the Que should always be called from transaction to avoid concurrency issues.
 CREATE OR REPLACE FUNCTION $[schema:name].$[dequeuefunctionname:name]("SubscriberName" character(32),"TimeoutInSeconds" integer) 

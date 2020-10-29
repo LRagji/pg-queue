@@ -20,6 +20,7 @@ module.exports =
         #dqFunctionName;
         #ackFunctionName;
         #deleteSubFunctionName;
+        #enqueFunctionName
         #schema;
 
         /**
@@ -63,7 +64,8 @@ module.exports =
                 this.#deleteSubFunctionName = "DEL-S-" + this.name;
                 this.#dqFunctionName = "DQ-" + this.name;
                 this.#ackFunctionName = "ACK-" + this.name;
-                this.#queries = queries(CursorTableName, QTableName, ExistingQuePagesFunctionName);
+                this.#enqueFunctionName = "NQ-" + this.name
+                this.#queries = queries();
                 let results;
                 switch (dbVersion) {
                     case -1: //First time install
@@ -85,7 +87,8 @@ module.exports =
                                 "subscriberregistrationfunctionname": SubscriberRegistrationFunctionName,
                                 "qname": this.name,
                                 "deletesubscriberfunctionname": this.#deleteSubFunctionName,
-                                "schema":this.#schema
+                                "schema":this.#schema,
+                                "enqfunctionname": this.#enqueFunctionName
                             };
                             await transaction.none(step, stepParams);
                         };
@@ -120,10 +123,7 @@ module.exports =
 
             await this.#initialize(schemaVersion);
 
-            await this.#writerPG.tx((transaction) => {
-                payloads.map((p) => transaction.none(this.#queries.Enqueue, [p]));
-                return transaction.batch;
-            });
+            await this.#writerPG.proc(this.#enqueFunctionName,[payloads]);
             //TODO Handle QUE FULL scenario(When one cursor is lagging and other cursor is fastest)
             return;
         }
