@@ -6,10 +6,10 @@ const initOptions = {
     // query(e) {
     //     console.log(e.query);
     // },
-    "schema": "Warehouse"
+    //"schema": "Q"
 };
 const pgp = require('pg-promise')(initOptions);
-const defaultConectionString = "postgres://postgres:@localhost:5432/Anukram";
+const defaultConectionString = "postgres://postgres:@localhost:5432/QUEUE";
 const writeConfigParams = {
     connectionString: defaultConectionString,
     application_name: "Example1-Queue-Writer",
@@ -52,21 +52,32 @@ function publisher() {
 
 }
 
-function processor() {
-    pgWriter.proc(("Process-" + Q.name), ["Subscriber-1"])
-        .then(console.log)
-        .then(() => {
-            if (processorHandle == undefined || (!processorHandle.cleared)) {
-                processorHandle = new Timeout(processor, 1000);
+let Subcriber = async () => {
+    let result;
+    do {
+        result = await Q.tryDeque(10);
+        if (result == null) {
+            console.log("No more data");
+        }
+        else {
+            let acked = await Q.tryAcknowledge(result.map(e => e.AckToken));
+            if (acked == undefined) {
+                console.log(`Acked` + result);
             }
-        })
-        .catch(console.error);
-}
+            else {
+                throw new Error('Failed to ack' + result);
+            }
+        }
+    }
+    while (result != undefined)
+};
 
-// publisher();
-// console.log("Publisher Active");
+publisher();
+console.log("Publisher Active");
 
-processor();
+Subcriber()
+    .then(console.log)
+    .catch(console.error)
 console.log("Processor Active");
 
-console.log("Press Ctrl+c to stop processing");
+console.log("Press Ctrl+C to stop processing");

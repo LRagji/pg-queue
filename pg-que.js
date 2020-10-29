@@ -20,6 +20,7 @@ module.exports =
         #dqFunctionName;
         #ackFunctionName;
         #deleteSubFunctionName;
+        #schema;
 
         /**
          * Creates a subscriber for queue
@@ -41,6 +42,7 @@ module.exports =
             this.#subscriber = subscriber;
             this.pages = pages;
             this.name = crypto.createHash('md5').update(name).digest('hex');
+            this.#schema = this.#writerPG.$config.options.schema || "public";
 
             this.tryEnque = this.tryEnque.bind(this);
             this.tryDeque = this.tryDeque.bind(this);
@@ -80,10 +82,10 @@ module.exports =
                                 "acknowledgepayloadfunctionname": this.#ackFunctionName,
                                 "trydequeuefunctionname": "TRY-DQ-" + this.name,
                                 "tryacknowledgepayloadfunctionname": "TRY-ACK-" + this.name,
-                                "processprocname": "Process-" + this.name,
                                 "subscriberregistrationfunctionname": SubscriberRegistrationFunctionName,
                                 "qname": this.name,
-                                "deletesubscriberfunctionname": this.#deleteSubFunctionName
+                                "deletesubscriberfunctionname": this.#deleteSubFunctionName,
+                                "schema":this.#schema
                             };
                             await transaction.none(step, stepParams);
                         };
