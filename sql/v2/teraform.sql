@@ -80,12 +80,15 @@ DECLARE
 "IsMinimum" BOOLEAN := FALSE;
 BEGIN
 	IF NEW."Page" <> OLD."Page" THEN
-		SELECT MIN("Page")= OLD."Page" INTO "IsMinimum" FROM $[schema:name].$[cursortablename:name];
-		IF "IsMinimum" THEN
-			SELECT 'TRUNCATE '|| quote_ident(TG_TABLE_SCHEMA)||'.' ||quote_ident($[qtablename] || '-' || OLD."Page")
-			INTO "DSql"
-			FROM $[schema:name].$[cursortablename:name];
-			EXECUTE "DSql";
+		SELECT Count(1)= 1 INTO "IsMinimum" FROM $[schema:name].$[cursortablename:name] WHERE "Page"=OLD."Page"; 
+		IF "IsMinimum" THEN 
+			SELECT MIN("Page")= OLD."Page" INTO "IsMinimum" FROM $[schema:name].$[cursortablename:name];
+			IF "IsMinimum" THEN
+				SELECT 'TRUNCATE '|| quote_ident(TG_TABLE_SCHEMA)||'.' ||quote_ident($[qtablename] || '-' || OLD."Page")
+				INTO "DSql"
+				FROM $[schema:name].$[cursortablename:name];
+				EXECUTE "DSql";
+			END IF;
 		END IF;
 	END IF;
 	RETURN NEW;
