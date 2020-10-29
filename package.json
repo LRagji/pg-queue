@@ -1,6 +1,6 @@
 {
   "name": "pg-que",
-  "version": "0.0.7",
+  "version": "0.0.9",
   "description": "Simple Q implementation on postgres.",
   "main": "pg-que.js",
   "scripts": {
@@ -27,7 +27,7 @@
     "@types/pg-promise": "^5.4.3",
     "mocha": "^8.1.3",
     "nyc": "^15.1.0",
-    "pg-boot": "0.0.3",
+    "pg-boot": "0.0.4",
     "pg-promise": "^10.6.2",
     "sinon": "^9.1.0"
   },
