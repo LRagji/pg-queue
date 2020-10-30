@@ -332,3 +332,10 @@ $$;
 -- WHERE relname like 'Q-7a28fd25d95c0969bff16b963af1c832%'
 -- AND C .relkind ='r' AND pg_total_relation_size (C .oid) > 16384 --16KB is  the default space a table takes
 -- ORDER BY pg_total_relation_size (C .oid) DESC 
+
+-- TODO FEEDBACK
+-- Lock is not getting released when process is terminated.->PGQ
+-- 6 seconds for DQ of 1lac cursors —>PGQ
+-- 4 seconds for ACK of 1lac cursors —>PGQ
+-- Table bloat on cursors for  high frequency Acks —>PGQ
+-- Need to remove QueryFile ->PGQ
