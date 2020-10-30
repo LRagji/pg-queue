@@ -174,6 +174,7 @@ WHERE "QID"[3] != 2--These status ones are active and we dont want them to be in
 	ROW_NUMBER() OVER() AS "Id"
 	FROM $[schema:name].$[qtablename:name] AS "Q"
 	WHERE "Q"."Serial" > (SELECT "MaxSerial" FROM "CursorState" LIMIT 1)
+	ORDER BY "Q"."Serial" ASC
 	LIMIT CASE WHEN TRUE THEN COALESCE((SELECT COUNT(1) FROM "CursorState" WHERE "Status"=0),0) END
 )
 SELECT jsonb_agg(jsonpacket) INTO "TruncateTriggerIsolation"
